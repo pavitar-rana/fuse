@@ -1,7 +1,5 @@
 # Own E2B - Cloud Execution Environment Backend
 
-A powerful TypeScript-based backend service for creating and managing isolated Firecracker Virtual Machines for secure code execution. This project provides an E2B-like cloud execution environment with REST APIs for VM lifecycle management, secure SSH-based command execution, and file operations.
-
 ## 🚀 Features
 
 - **Firecracker VM Management**: Create, manage, and delete lightweight Firecracker VMs
@@ -248,16 +246,4 @@ src/
 - Set up proper authentication/authorization
 - Review network security and firewall rules
 - Monitor VM resource usage and cleanup orphaned VMs
-
-## 🤝 Contributing
-
-This appears to be a custom E2B implementation. When contributing:
-- Follow TypeScript best practices
-- Add proper error handling
-- Update API documentation
-- Test VM lifecycle operations
-- Ensure proper resource cleanup
-
 ---
-
-**Note**: This is a development setup. For production deployment, ensure proper security hardening, resource monitoring, and backup procedures.
