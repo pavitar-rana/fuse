@@ -1,4 +1,4 @@
-# Own E2B - Cloud Execution Environment Backend
+# Fuse - Cloud Execution Environment Backend
 
 ## 🚀 Features
 
@@ -15,12 +15,14 @@
 ### Core Components
 
 #### 1. **API Layer** (`src/`)
+
 - **Express Server** (`src/index.ts`): Main entry point running on port 8080
 - **Routes** (`src/routes/`):
   - `/firecracker/*` - VM management endpoints
   - `/firecracker/exec/*` - Command execution endpoints
 
 #### 2. **VM Management** (`src/firecracker/`)
+
 - **VM Creation** (`firecracker.create.ts`): Provisions new Firecracker VMs
 - **VM Deletion** (`firecracker.delete.ts`): Cleanup and resource deallocation
 - **Network Setup** (`firecracker.network.ts`): TAP interfaces and bridge networking
@@ -28,9 +30,10 @@
 - **Boot Management** (`firecracker.boot.ts`): VM startup procedures
 
 #### 3. **Controllers** (`src/controller/`)
+
 - **VM Controller** (`createVM.controller.ts`):
   - `POST /firecracker/create` - Create new VM
-  - `POST /firecracker/delete` - Delete existing VM  
+  - `POST /firecracker/delete` - Delete existing VM
   - `POST /firecracker/get-host` - Get VM host URL
 - **Execution Controller** (`exec.controller.ts`):
   - `POST /firecracker/exec/run` - Execute commands in VM
@@ -38,10 +41,12 @@
   - `POST /firecracker/exec/write` - Write files to VM
 
 #### 4. **Services** (`src/services/`)
+
 - **SSH Service** (`ssh/`): Secure command execution and file operations
 - **Redis Service** (`redis/`): Caching and session management
 
 #### 5. **Database Layer** (`src/lib/`, `src/prisma/`)
+
 - **Prisma ORM**: Database abstraction and type safety
 - **Models**: User, Project, VirtualMachine, Session management
 
@@ -81,13 +86,15 @@ VirtualMachine:
 ### Installation
 
 1. **Clone and install dependencies**:
+
 ```bash
 git clone <repository>
-cd own-e2b
+cd fuse
 npm install
 ```
 
 2. **Set up environment variables**:
+
 ```bash
 # Database
 DATABASE_URL="postgresql://username:password@localhost:5432/e2b"
@@ -97,12 +104,14 @@ DIRECT_URL="postgresql://username:password@localhost:5432/e2b"
 ```
 
 3. **Database setup**:
+
 ```bash
 npx prisma generate
 npx prisma db push
 ```
 
 4. **Prepare VM images** (update paths in controller):
+
 ```bash
 # Download or build kernel and rootfs
 # Update paths in src/controller/createVM.controller.ts:
@@ -111,6 +120,7 @@ npx prisma db push
 ```
 
 5. **Start the server**:
+
 ```bash
 npm run dev
 ```
@@ -120,6 +130,7 @@ npm run dev
 ### VM Management
 
 #### Create VM
+
 ```bash
 POST /firecracker/create
 {
@@ -130,6 +141,7 @@ POST /firecracker/create
 Returns VM details including IP, MAC, and connection info.
 
 #### Delete VM
+
 ```bash
 POST /firecracker/delete
 {
@@ -139,6 +151,7 @@ POST /firecracker/delete
 ```
 
 #### Get VM Host URL
+
 ```bash
 POST /firecracker/get-host
 {
@@ -151,6 +164,7 @@ POST /firecracker/get-host
 ### Command Execution
 
 #### Run Command
+
 ```bash
 POST /firecracker/exec/run
 {
@@ -163,6 +177,7 @@ POST /firecracker/exec/run
 ```
 
 #### Create Directory
+
 ```bash
 POST /firecracker/exec/create-dir
 {
@@ -173,6 +188,7 @@ POST /firecracker/exec/create-dir
 ```
 
 #### Write File
+
 ```bash
 POST /firecracker/exec/write
 {
@@ -187,6 +203,7 @@ POST /firecracker/exec/write
 ## 🔧 Configuration
 
 ### VM Default Settings
+
 - **Memory**: 512MB
 - **vCPUs**: 1
 - **Network**: Bridge mode with internet access
@@ -202,7 +219,7 @@ src/
 │   ├── generated/       # Prisma generated client
 │   └── prisma.ts       # Database connection
 ├── prisma/             # Database schema
-├── routes/             # Express route definitions  
+├── routes/             # Express route definitions
 └── services/           # External service integrations
     ├── redis/          # Caching layer
     └── ssh/            # Secure command execution
@@ -212,13 +229,14 @@ src/
 
 - **Isolated VMs**: Each user gets isolated Firecracker VMs
 - **SSH Key Authentication**: Secure command execution
-- **Network Isolation**: VMs run in isolated network namespaces  
+- **Network Isolation**: VMs run in isolated network namespaces
 - **Resource Limits**: Configurable CPU and memory constraints
 - **User Isolation**: Database-level user and project separation
 
 ## 🛠️ Development
 
 ### Key Technologies
+
 - **Runtime**: Node.js with TypeScript
 - **Framework**: Express.js
 - **Database**: PostgreSQL with Prisma ORM
@@ -227,6 +245,7 @@ src/
 - **SSH**: ssh2 library for secure connections
 
 ### Code Organization
+
 - **Controllers**: Handle HTTP requests and responses
 - **Services**: Reusable business logic components
 - **Firecracker Module**: VM lifecycle management
@@ -246,4 +265,5 @@ src/
 - Set up proper authentication/authorization
 - Review network security and firewall rules
 - Monitor VM resource usage and cleanup orphaned VMs
+
 ---

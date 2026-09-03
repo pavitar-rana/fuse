@@ -30,3 +30,6 @@ dist-ssr
 
 lib/generated/prisma
 generated/prisma
+
+# personal notes / study material
+notes/
