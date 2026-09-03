@@ -11,6 +11,18 @@ node_modules
 dist
 dist-ssr
 *.local
+.turbo
+
+# next.js
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# misc build/test output
+coverage
+.vercel
+*.tgz
 
 # Editor directories and files
 .vscode/*
@@ -24,6 +36,7 @@ dist-ssr
 *.sw?
 
 .env
+.env*.local
 
 # vscode
 .vscode
