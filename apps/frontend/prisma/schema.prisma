@@ -49,13 +49,6 @@ model Project {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-model Message {
-  id        String   @id @default(uuid())
-  projectId String?
-  role      String
-  content   Json
-  Project   Project? @relation(fields: [projectId], references: [id])
-}
 
 model Virtualmachine {
   id        String @id @default(cuid())

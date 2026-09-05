@@ -1,27 +1,26 @@
 import dotenv from "dotenv";
 import { execSync } from "child_process";
 import type { clientType } from "../lib/types.ts";
-import { createFirecrackerClient } from "./index.ts";
-import { getRedisClient } from "../services/redis/index.ts";
-import { disconnectSSH } from "../services/ssh/index.ts";
+import { createFirecrackerClient, deleteHostPort } from "./index.ts";
+import { getRedisClient } from "../helpers/redis/index.ts";
+import { disconnectSSH } from "../helpers/ssh/index.ts";
 
 dotenv.config();
 
 export const deleteFireCracker = async (
   id: string,
   ip: string,
+  port: number,
   rootfsPath?: string,
-  projectId?: string,
 ) => {
   const redisClient = await getRedisClient();
   const api_socket = `/tmp/firecracker-${id}.socket`;
   const client: clientType = createFirecrackerClient(api_socket);
 
-  console.log("Deleting VM with IP:", ip);
-
   disconnectSSH(ip);
 
   await redisClient.sRem("allocated_ips", ip);
+  await deleteHostPort(port);
 
   try {
     await client.put("/actions", { action_type: "SendCtrlAltDel" });

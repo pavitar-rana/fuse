@@ -40,16 +40,28 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
+
+enum VmStatus {
+  CREATING
+  RUNNING
+  PAUSED
+  TERMINATING
+  TERMINATED
+  FAILED
+}
+
+
 model Virtualmachine {
   id         String @id @default(cuid())
   vmIp       String
+  hostPort   String
   vmMac      String
-  status     String
   socket     String
   rootfsPath String
   userId     String
   vcpuCount  Int
   memSize    Int
+  status     VmStatus @default(CREATING)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

@@ -10,6 +10,8 @@ import {
   bootSetup,
   configSetup,
   startInstance,
+  generateHostPort,
+  setupHostPort,
 } from "../firecracker/index.ts";
 import type { VmConfigType, clientType, IPConfig } from "../lib/types.ts";
 import { createFirecrackerClient } from "./index.ts";
@@ -18,13 +20,9 @@ export const createFireCracker = async (config: VmConfigType) => {
   if (!config.kernelImage || !config.rootfsPath) {
     throw new Error("Missing kernelImage or rootfsPath in config");
   }
-
   const id = createId();
-  console.log("Creating VM with ID: ", id);
 
   const vmRootfs = `/tmp/vm-${id}.ext4`;
-  console.log(`Creating VM-specific rootfs: ${vmRootfs}`);
-  console.log(`Copying from: ${config.rootfsPath}`);
 
   try {
     execSync(`cp "${config.rootfsPath}" "${vmRootfs}"`);
@@ -37,6 +35,7 @@ export const createFireCracker = async (config: VmConfigType) => {
   const client: clientType = createFirecrackerClient(api_socket);
 
   const vmIP = await generateVmIp();
+  const hostPort = await generateHostPort();
   const tap = `tap_${id.slice(0, 8)}`;
   const mac = macFromCuid(id);
 
@@ -46,11 +45,14 @@ export const createFireCracker = async (config: VmConfigType) => {
 
   const ipConfig: IPConfig = {
     vmIP: vmIP,
+    hostPort: hostPort,
     hostIP: HOST_GATEWAY_IP,
     gateway: HOST_GATEWAY_IP,
     netmask: "255.255.255.0",
     nameservers: ["8.8.8.8", "8.8.4.4"],
   };
+
+  await setupHostPort(vmIP, hostPort);
 
   await setupTapInterface(tap);
   await setupSocket(api_socket, id);
@@ -78,6 +80,7 @@ export const createFireCracker = async (config: VmConfigType) => {
     id,
     vmIP,
     vmMac: mac,
+    hostPort,
     socket: api_socket,
     vcpuCount: config.vcpuCount,
     memSize: config.memSize,

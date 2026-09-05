@@ -1,4 +1,4 @@
-import { getRedisClient } from "../services/redis/index.ts";
+import { getRedisClient } from "../helpers/redis/index.ts";
 import crypto from "crypto";
 
 const redisClient = await getRedisClient();
@@ -6,13 +6,26 @@ const redisClient = await getRedisClient();
 export const generateVmIp = async () => {
   for (let i = 2; i < 255; i++) {
     const ip = `172.16.0.${i}`;
-    const isAllocated = await redisClient.sIsMember("allocated_ips", ip);
-    if (!isAllocated) {
-      await redisClient.sAdd("allocated_ips", ip);
+    const isAllocated = await redisClient.sAdd("allocated_ips", ip);
+    if (isAllocated == 1) {
       return ip;
     }
   }
   throw new Error("No available IPs in the 172.16.0.0/24 range");
+};
+
+export const generateHostPort = async () => {
+  for (let port = 8000; port < 9000; port++) {
+    const isAllocated = await redisClient.sAdd("allocated_ports", String(port));
+    if (isAllocated == 1) {
+      return port;
+    }
+  }
+  throw new Error("Host not available");
+};
+
+export const deleteHostPort = async (port: number) => {
+  return await redisClient.sRem("allocated_ports", String(port));
 };
 
 export const HOST_GATEWAY_IP = "172.16.0.1";
