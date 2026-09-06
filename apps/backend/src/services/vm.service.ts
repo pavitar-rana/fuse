@@ -1,9 +1,9 @@
 import { createFireCracker } from "../firecracker/firecracker.create.ts";
-import { prisma } from "../lib/prisma.ts";
 import { VmConfigType } from "../lib/types.ts";
 import { deleteFireCracker } from "../firecracker/firecracker.delete.ts";
-import { VM_TO_HOST_PORT } from "../lib/constants.ts";
 import { serviceError } from "./index.ts";
+
+import * as vmRepository from "../repositories/vm.repository.ts";
 
 export const createVm = async (userId: string, config: VmConfigType) => {
   try {
@@ -18,20 +18,7 @@ export const createVm = async (userId: string, config: VmConfigType) => {
 
     if (!sbx.vmIP) throw serviceError("Failed to Create VM", 500);
 
-    const vm = await prisma.virtualmachine.create({
-      data: {
-        id: sbx.id,
-        vcpuCount: sbx.vcpuCount,
-        memSize: sbx.memSize,
-        userId,
-        vmMac: sbx.vmMac,
-        hostPort: sbx.hostPort,
-        vmIp: sbx.vmIP,
-        status: "running",
-        socket: sbx.socket,
-        rootfsPath: sbx.rootfsPath,
-      },
-    });
+    const vm = await vmRepository.createVm(userId, sbx);
 
     if (!vm) throw serviceError("Failed to Create VM", 500);
 
@@ -53,12 +40,7 @@ export const deleteVm = async (vmId: string, userId: string) => {
   try {
     if (!vmId || !userId) throw serviceError("Id and userId is required", 400);
 
-    const vm = await prisma.virtualmachine.delete({
-      where: {
-        id: vmId,
-        userId: userId,
-      },
-    });
+    const vm = await vmRepository.deleteVmById(vmId, userId);
 
     await deleteFireCracker(vmId, vm.vmIp, vm.hostPort, vm.rootfsPath);
 
@@ -79,16 +61,11 @@ export const getVmUrl = async (
     if (!vmm.id || !vmm.ip || !userId)
       throw serviceError("Id is required", 400);
 
-    const vm = await prisma.virtualmachine.findUnique({
-      where: {
-        id: vmm.id,
-        userId,
-      },
-    });
+    const vm = await vmRepository.findVmById(vmm.id, userId);
 
     if (!vm) throw serviceError("Vm not found", 500);
 
-    const port = VM_TO_HOST_PORT[vmm.ip];
+    const port = vm.hostPort;
     const hostAddr = process.env.HOSTADDR;
 
     const url = `${hostAddr}:${port}`;

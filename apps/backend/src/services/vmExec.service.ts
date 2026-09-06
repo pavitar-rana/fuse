@@ -1,11 +1,11 @@
 import { attemptSSHConnection } from "../firecracker/firecracker.ssh.ts";
-import { prisma } from "../lib/prisma.ts";
 import { serviceError } from "./index.ts";
 import {
   createDirfn,
   runCommandfn,
   writeFilefn,
 } from "../helpers/ssh/index.ts";
+import * as vmRepository from "../repositories/vm.repository.ts";
 
 export const runCommand = async (
   id: string,
@@ -18,12 +18,7 @@ export const runCommand = async (
     throw serviceError("Id is required", 400);
   }
 
-  const vm = await prisma.virtualmachine.findUnique({
-    where: {
-      id,
-      userId,
-    },
-  });
+  const vm = await vmRepository.findVmById(id, userId);
 
   if (!vm) {
     throw serviceError("VM not found", 500);
@@ -55,12 +50,7 @@ export const createDir = async (path: string, userId: string, id: string) => {
     throw serviceError("All params needed", 500);
   }
 
-  const vm = await prisma.virtualmachine.findUnique({
-    where: {
-      id,
-      userId,
-    },
-  });
+  const vm = await vmRepository.findVmById(id, userId);
 
   if (!vm) {
     throw serviceError("VM not found", 500);
@@ -85,12 +75,7 @@ export const writeFile = async (
     throw serviceError("Id is required", 400);
   }
 
-  const vm = await prisma.virtualmachine.findUnique({
-    where: {
-      id,
-      userId,
-    },
-  });
+  const vm = await vmRepository.findVmById(id, userId);
 
   if (!vm) {
     throw serviceError("Vm not found", 500);

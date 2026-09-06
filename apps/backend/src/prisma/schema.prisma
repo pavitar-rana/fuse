@@ -54,7 +54,6 @@ enum VmStatus {
 model Virtualmachine {
   id         String @id @default(cuid())
   vmIp       String
-  hostPort   String
   vmMac      String
   socket     String
   rootfsPath String
@@ -63,8 +62,23 @@ model Virtualmachine {
   memSize    Int
   status     VmStatus @default(CREATING)
 
+  portMappings PortMapping[]
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model PortMapping {
+  id       String @id @default(cuid())
+  vmId     String
+  vmPort   Int
+  hostPort Int
+
+  vm Virtualmachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([vmId, vmPort])
 }

@@ -3,9 +3,10 @@ import { execSync } from "child_process";
 export const setupHostPort = async (
   vmIP: string,
   hostPort: number,
+  vmPort: number,
 ): Promise<void> => {
   execSync(
-    `sudo iptables -t nat -A PREROUTING -p tcp --dport ${hostPort} -j DNAT --to-destination ${vmIP}:22`,
+    `sudo iptables -t nat -A PREROUTING -p tcp --dport ${hostPort} -j DNAT --to-destination ${vmIP}:${vmPort}`,
   );
   execSync(`sudo iptables -A FORWARD -p tcp -d ${vmIP} --dport 22 -j ACCEPT`);
 
