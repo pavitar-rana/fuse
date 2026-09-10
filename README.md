@@ -12,8 +12,8 @@ No orchestration frameworks. No managed services. Just the Firecracker API socke
 
 ```
 apps/
-  backend/    Express 5 control plane: VM lifecycle, networking, SSH exec
-  frontend/   Next.js 16 dashboard: API keys, VM fleet, resource stats
+  backend/    Express control plane: VM lifecycle, networking, SSH exec
+  frontend/   Next.js dashboard: API keys, VM fleet, resource stats
 ```
 
 **Control plane** (`apps/backend`)
@@ -42,11 +42,6 @@ apps/
 ## Running it
 
 Requires a Linux host with KVM
-
-```bash
-pnpm install
-pnpm dev
-```
 
 ## Status
 
