@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "dotenv -e .env && turbo run dev"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +18,7 @@
     }
   },
   "devDependencies": {
+    "dotenv-cli": "^11.0.0",
     "turbo": "^2.10.12"
   }
 }

@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client"
-  output   = "../lib/generated/prisma"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
@@ -40,28 +40,45 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
-model Project {
-  id        String    @id @default(uuid())
-  name      String
-  userId    String
-  createdAt DateTime  @default(now())
-  messages  Message[]
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+enum VmStatus {
+  CREATING
+  RUNNING
+  PAUSED
+  TERMINATING
+  TERMINATED
+  FAILED
 }
 
 
 model Virtualmachine {
-  id        String @id @default(cuid())
-  vmIp      String
-  vmMac     String
-  status    String
-  socket    String
-  userId    String
-  vcpuCount Int
-  memSize   Int
+  id         String @id @default(cuid())
+  vmIp       String
+  vmMac      String
+  socket     String
+  rootfsPath String
+  userId     String
+  vcpuCount  Int
+  memSize    Int
+  status     VmStatus @default(CREATING)
+
+  portMappings PortMapping[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model PortMapping {
+  id       String @id @default(cuid())
+  vmId     String
+  vmPort   Int
+  hostPort Int
+
+  vm Virtualmachine @relation(fields: [vmId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([vmId, vmPort])
 }
