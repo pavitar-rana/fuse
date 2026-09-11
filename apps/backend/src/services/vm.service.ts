@@ -4,6 +4,7 @@ import { deleteFireCracker } from "../firecracker/firecracker.delete.ts";
 import { serviceError } from "./index.ts";
 
 import * as vmRepository from "../repositories/vm.repository.ts";
+import { generateHostPort } from "../firecracker/firecracker.utils.ts";
 
 export const createVm = async (userId: string, config: VmConfigType) => {
   try {
@@ -42,7 +43,7 @@ export const deleteVm = async (vmId: string, userId: string) => {
 
     const vm = await vmRepository.deleteVmById(vmId, userId);
 
-    await deleteFireCracker(vmId, vm.vmIp, vm.hostPort, vm.rootfsPath);
+    await deleteFireCracker(vmId, vm.vmIp, vm.rootfsPath);
 
     return {
       message: "Deleted Vm",

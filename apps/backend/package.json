@@ -19,7 +19,8 @@
     "redis": "^5.9.0",
     "ssh2": "^1.17.0",
     "ts-node": "^10.9.2",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.0",
+    "@fuse/db": "workspace:*"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",

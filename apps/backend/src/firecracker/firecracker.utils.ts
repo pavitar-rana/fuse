@@ -14,11 +14,14 @@ export const generateVmIp = async () => {
   throw new Error("No available IPs in the 172.16.0.0/24 range");
 };
 
-export const generateHostPort = async () => {
+export const generateHostPort = async (vmPort: number) => {
   for (let port = 8000; port < 9000; port++) {
     const isAllocated = await redisClient.sAdd("allocated_ports", String(port));
     if (isAllocated == 1) {
-      return port;
+      return {
+        hostPort: port,
+        vmPort: vmPort,
+      };
     }
   }
   throw new Error("Host not available");

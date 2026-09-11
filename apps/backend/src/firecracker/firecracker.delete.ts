@@ -4,13 +4,14 @@ import type { clientType } from "../lib/types.ts";
 import { createFirecrackerClient, deleteHostPort } from "./index.ts";
 import { getRedisClient } from "../helpers/redis/index.ts";
 import { disconnectSSH } from "../helpers/ssh/index.ts";
+import { PortMapping } from "@fuse/db/client";
 
 dotenv.config();
 
 export const deleteFireCracker = async (
   id: string,
   ip: string,
-  port: number,
+  portMap: PortMapping[],
   rootfsPath?: string,
 ) => {
   const redisClient = await getRedisClient();

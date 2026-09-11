@@ -4,6 +4,10 @@
   "description": "",
   "type": "module",
   "main": "index.js",
+  "exports": {
+    ".": "./lib/prisma.ts",
+    "./client": "./src/generated/prisma/client.ts"
+  },
   "scripts": {
     "postinstall": "prisma generate",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -12,7 +16,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@prisma/client": "^7.10.0"
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "pg": "^8.23.0"
   },
   "devDependencies": {
     "prisma": " ^7.10.0"
