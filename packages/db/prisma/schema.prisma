@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
 model User {
@@ -58,6 +58,8 @@ model Virtualmachine {
   vcpuCount  Int
   memSize    Int
   status     VmStatus @default(CREATING)
+  hostId String
+  host Host @relation(fields: [hostId], references:[id])
 
   portMappings PortMapping[]
 
@@ -78,4 +80,43 @@ model PortMapping {
   createdAt DateTime @default(now())
 
   @@unique([vmId, vmPort])
+}
+
+enum PoolStatus {
+  AVAILABLE
+  ALLOCATED
+}
+
+model Host {
+  id String @id @default(cuid())
+  hostname String @unique
+  ipRange String 
+  ipPool IpPool[]
+  portPool PortPool[]
+  vms Virtualmachine[]
+}
+
+
+model IpPool {
+
+  id String @id @default(cuid())
+  hostId String
+  host Host @relation(fields: [hostId], references:[id] )
+  ip String
+  status PoolStatus @default(AVAILABLE)
+  vmId String? @unique
+
+  @@unique([hostId, ip])
+  @@index([hostId, status])
+}
+
+model PortPool {
+    id String @id @default(cuid())
+    hostId String
+    host Host @relation(fields: [hostId], references: [id])
+    hostPort Int
+    status PoolStatus @default(AVAILABLE)
+    vmId String?
+    @@unique([hostId, hostPort])
+    @@index([hostId, status])
 }
