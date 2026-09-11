@@ -41,8 +41,8 @@ coverage
 # vscode
 .vscode
 
-lib/generated/prisma
-generated/prisma
+**/lib/generated/prisma
+**/generated/prisma
 
 # personal notes / study material
 notes/
