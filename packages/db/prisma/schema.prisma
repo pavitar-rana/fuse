@@ -5,8 +5,6 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -18,7 +16,6 @@ model User {
   image          String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
-  Project        Project[]
   sessions       Session[]
   Virtualmachine Virtualmachine[]
 }
