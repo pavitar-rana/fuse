@@ -3,8 +3,8 @@ export type clientType = {
   get: <T>(path: string) => Promise<T>;
 };
 export type VmConfigType = {
-  kernelImage: string;
-  rootfsPath: string;
+  kernelImage?: string;
+  rootfsPath?: string;
   memSize?: number;
   vcpuCount?: number;
   sshBaseDelayMs?: number;
@@ -14,7 +14,6 @@ export type VmConfigType = {
 
 export type IPConfig = {
   vmIP: string;
-  hostPort: number;
   hostIP: string;
   gateway: string;
   netmask: string;

@@ -13,6 +13,19 @@ export const setupHostPort = async (
   return;
 };
 
+export const deleteHostPort = async (
+  vmIP: string,
+  hostPort: number,
+  vmPort: number,
+): Promise<void> => {
+  execSync(
+    `sudo iptables -t nat -D PREROUTING -p tcp --dport ${hostPort} -j DNAT --to-destination ${vmIP}:${vmPort}`,
+  );
+  execSync(`sudo iptables -D FORWARD -p tcp -d ${vmIP} --dport 22 -j ACCEPT`);
+
+  return;
+};
+
 export const setupTapInterface = async (tap: string): Promise<void> => {
   execSync(`sudo ip link show br0 || sudo ip link add name br0 type bridge`);
   execSync(`sudo ip addr add 172.16.0.1/24 dev br0 2>/dev/null || true`);

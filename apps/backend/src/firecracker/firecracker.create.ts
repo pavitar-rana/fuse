@@ -1,7 +1,6 @@
 import { createId } from "@paralleldrive/cuid2";
 import { execSync } from "child_process";
 import {
-  generateVmIp,
   macFromCuid,
   HOST_GATEWAY_IP,
   setupTapInterface,
@@ -10,19 +9,20 @@ import {
   bootSetup,
   configSetup,
   startInstance,
-  generateHostPort,
   setupHostPort,
 } from "../firecracker/index.ts";
 import type { VmConfigType, clientType, IPConfig } from "../lib/types.ts";
 import { createFirecrackerClient } from "./index.ts";
+import { getVmIP } from "../repositories/vm.repository.ts";
+import { getCurrentHost } from "../config/host.ts";
 
 export const createFireCracker = async (config: VmConfigType) => {
   if (!config.kernelImage || !config.rootfsPath) {
     throw new Error("Missing kernelImage or rootfsPath in config");
   }
-  const id = createId();
-
-  const vmRootfs = `/tmp/vm-${id}.ext4`;
+  const vmId = createId();
+  const host = await getCurrentHost();
+  const vmRootfs = `/tmp/vm-${vmId}.ext4`;
 
   try {
     execSync(`cp "${config.rootfsPath}" "${vmRootfs}"`);
@@ -31,13 +31,12 @@ export const createFireCracker = async (config: VmConfigType) => {
     throw new Error("Failed to create VM rootfs");
   }
 
-  const api_socket = `/tmp/firecracker-${id}.socket`;
+  const api_socket = `/tmp/firecracker-${vmId}.socket`;
   const client: clientType = createFirecrackerClient(api_socket);
 
-  const vmIP = await generateVmIp();
-  const hostPort = await generateHostPort();
-  const tap = `tap_${id.slice(0, 8)}`;
-  const mac = macFromCuid(id);
+  const vmIP = await getVmIP(vmId, host.id);
+  const tap = `tap_${vmId.slice(0, 8)}`;
+  const mac = macFromCuid(vmId);
 
   if (!mac || !vmIP) {
     throw new Error("Cant generate mac address or VM IP");
@@ -45,17 +44,14 @@ export const createFireCracker = async (config: VmConfigType) => {
 
   const ipConfig: IPConfig = {
     vmIP: vmIP,
-    hostPort: hostPort,
     hostIP: HOST_GATEWAY_IP,
     gateway: HOST_GATEWAY_IP,
     netmask: "255.255.255.0",
     nameservers: ["8.8.8.8", "8.8.4.4"],
   };
 
-  await setupHostPort(vmIP, hostPort);
-
   await setupTapInterface(tap);
-  await setupSocket(api_socket, id);
+  await setupSocket(api_socket, vmId);
 
   await bootSetup({
     ipConfig,
@@ -77,10 +73,10 @@ export const createFireCracker = async (config: VmConfigType) => {
   });
 
   return {
-    id,
+    vmId,
     vmIP,
     vmMac: mac,
-    hostPort,
+    hostId: host.id,
     socket: api_socket,
     vcpuCount: config.vcpuCount,
     memSize: config.memSize,

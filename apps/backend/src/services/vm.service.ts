@@ -2,9 +2,9 @@ import { createFireCracker } from "../firecracker/firecracker.create.ts";
 import { VmConfigType } from "../lib/types.ts";
 import { deleteFireCracker } from "../firecracker/firecracker.delete.ts";
 import { serviceError } from "./index.ts";
-
 import * as vmRepository from "../repositories/vm.repository.ts";
-import { generateHostPort } from "../firecracker/firecracker.utils.ts";
+import { getCurrentHost } from "../config/host.ts";
+import { setupHostPort } from "../firecracker/firecracker.network.ts";
 
 export const createVm = async (userId: string, config: VmConfigType) => {
   try {
@@ -13,23 +13,24 @@ export const createVm = async (userId: string, config: VmConfigType) => {
     const sbx = await createFireCracker({
       kernelImage: "/home/pavitar/vmlinux-6.1.141",
       rootfsPath: "/home/pavitar/ubuntu-1.5G.ext4",
-      memSize: 512,
-      vcpuCount: 1,
+      memSize: config.memSize,
+      vcpuCount: config.vcpuCount,
     });
 
     if (!sbx.vmIP) throw serviceError("Failed to Create VM", 500);
-
     const vm = await vmRepository.createVm(userId, sbx);
-
     if (!vm) throw serviceError("Failed to Create VM", 500);
 
     return {
       message: "Success Creating sbx",
       data: {
-        vmIp: sbx.vmIP,
-        mac: sbx.vmMac,
-        id: sbx.id,
-        socker: sbx.socket,
+        vmIp: vm.vmIp,
+        mac: vm.vmMac,
+        id: vm.id,
+        socket: vm.socket,
+        rootfsPath: vm.rootfsPath,
+        vCpu: vm.vcpuCount,
+        memSize: vm.memSize,
       },
     };
   } catch (e) {
@@ -42,8 +43,9 @@ export const deleteVm = async (vmId: string, userId: string) => {
     if (!vmId || !userId) throw serviceError("Id and userId is required", 400);
 
     const vm = await vmRepository.deleteVmById(vmId, userId);
+    const portMap = await vmRepository.getPortMap(vmId);
 
-    await deleteFireCracker(vmId, vm.vmIp, vm.rootfsPath);
+    await deleteFireCracker(vm, portMap);
 
     return {
       message: "Deleted Vm",
@@ -56,25 +58,42 @@ export const deleteVm = async (vmId: string, userId: string) => {
 
 export const getVmUrl = async (
   userId: string,
-  vmm: { id: string; ip: string },
+  vmm: { id: string; port: number },
 ) => {
   try {
-    if (!vmm.id || !vmm.ip || !userId)
-      throw serviceError("Id is required", 400);
+    if (!vmm.id || !userId) throw serviceError("Id is required", 400);
 
     const vm = await vmRepository.findVmById(vmm.id, userId);
 
     if (!vm) throw serviceError("Vm not found", 500);
 
-    const port = vm.hostPort;
-    const hostAddr = process.env.HOSTADDR;
+    const host = await getCurrentHost();
+    const addrPrefix = process.env.ADDR_PREFIX;
 
-    const url = `${hostAddr}:${port}`;
+    const portMap = await vmRepository.findPortMapping(vm.id, vmm.port);
+
+    if (portMap) {
+      return {
+        messgae: "Got url",
+        data: {
+          url: `${addrPrefix}:${portMap.hostPort}`,
+        },
+      };
+    }
+
+    const hostPort = await vmRepository.getHostPort(vm.id, host.id);
+    const portMapping = await vmRepository.createPortMap(
+      vm.id,
+      vmm.port,
+      hostPort,
+    );
+
+    await setupHostPort(vm.vmIp, portMapping.hostPort, portMapping.vmPort);
 
     return {
       messgae: "Got url",
       data: {
-        url,
+        url: `${addrPrefix}:${hostPort}`,
       },
     };
   } catch (e) {

@@ -1,27 +1,27 @@
 import dotenv from "dotenv";
 import { execSync } from "child_process";
 import type { clientType } from "../lib/types.ts";
-import { createFirecrackerClient, deleteHostPort } from "./index.ts";
+import { createFirecrackerClient, deleteVmPortMap } from "./index.ts";
 import { getRedisClient } from "../helpers/redis/index.ts";
 import { disconnectSSH } from "../helpers/ssh/index.ts";
-import { PortMapping } from "@fuse/db/client";
+import { PortMapping, Virtualmachine } from "@fuse/db/client";
+import { getCurrentHost } from "../config/host.ts";
 
 dotenv.config();
 
 export const deleteFireCracker = async (
-  id: string,
-  ip: string,
+  vm: Virtualmachine,
   portMap: PortMapping[],
-  rootfsPath?: string,
 ) => {
   const redisClient = await getRedisClient();
-  const api_socket = `/tmp/firecracker-${id}.socket`;
+  const api_socket = `/tmp/firecracker-${vm.id}.socket`;
   const client: clientType = createFirecrackerClient(api_socket);
 
-  disconnectSSH(ip);
+  const host = await getCurrentHost();
 
-  await redisClient.sRem("allocated_ips", ip);
-  await deleteHostPort(port);
+  disconnectSSH(vm.vmIp);
+
+  await deleteVmPortMap(portMap, host.id, vm.vmIp);
 
   try {
     await client.put("/actions", { action_type: "SendCtrlAltDel" });
@@ -60,17 +60,17 @@ export const deleteFireCracker = async (
     console.error("Error removing socket:", err?.message || err);
   }
 
-  if (rootfsPath) {
+  if (vm.rootfsPath) {
     try {
-      console.log(`Deleting VM rootfs: ${rootfsPath}`);
-      execSync(`rm -f ${rootfsPath}`);
+      console.log(`Deleting VM rootfs: ${vm.rootfsPath}`);
+      execSync(`rm -f ${vm.rootfsPath}`);
       console.log(`Rootfs deleted successfully`);
     } catch (err: any) {
       console.error("Error removing VM rootfs:", err?.message || err);
     }
   }
 
-  const tap = `tap_${id.slice(0, 8)}`;
+  const tap = `tap_${vm.id.slice(0, 8)}`;
   try {
     console.log(`Cleaning up TAP interface: ${tap}`);
     execSync(`sudo ip link del ${tap} 2>/dev/null || true`);
@@ -78,5 +78,5 @@ export const deleteFireCracker = async (
     console.error("Error removing TAP interface:", err?.message || err);
   }
 
-  console.log(`VM ${id} cleanup completed`);
+  console.log(`VM ${vm.id} cleanup completed`);
 };

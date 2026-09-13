@@ -1,35 +1,7 @@
-import { getRedisClient } from "../helpers/redis/index.ts";
+import { prisma } from "@fuse/db";
+import { PortMapping } from "@fuse/db/client";
 import crypto from "crypto";
-
-const redisClient = await getRedisClient();
-
-export const generateVmIp = async () => {
-  for (let i = 2; i < 255; i++) {
-    const ip = `172.16.0.${i}`;
-    const isAllocated = await redisClient.sAdd("allocated_ips", ip);
-    if (isAllocated == 1) {
-      return ip;
-    }
-  }
-  throw new Error("No available IPs in the 172.16.0.0/24 range");
-};
-
-export const generateHostPort = async (vmPort: number) => {
-  for (let port = 8000; port < 9000; port++) {
-    const isAllocated = await redisClient.sAdd("allocated_ports", String(port));
-    if (isAllocated == 1) {
-      return {
-        hostPort: port,
-        vmPort: vmPort,
-      };
-    }
-  }
-  throw new Error("Host not available");
-};
-
-export const deleteHostPort = async (port: number) => {
-  return await redisClient.sRem("allocated_ports", String(port));
-};
+import { deleteHostPort } from "./firecracker.network.ts";
 
 export const HOST_GATEWAY_IP = "172.16.0.1";
 
@@ -40,4 +12,30 @@ export const macFromCuid = (cuid: string) => {
   mac[0] = (mac[0] & 0xfe) | 0x02;
 
   return [...mac].map((b) => b.toString(16).padStart(2, "0")).join(":");
+};
+
+export const deleteVmPortMap = async (
+  portMap: PortMapping[],
+  hostId: string,
+  vmIp: string,
+) => {
+  for (const port of portMap) {
+    await deleteHostPort(vmIp, port.hostPort, port.vmPort);
+    await prisma.$transaction(async (tx) => {
+      await tx.portMapping.delete({
+        where: {
+          vmId_vmPort: { vmId: port.vmId, vmPort: port.vmPort },
+        },
+      });
+      await tx.portPool.update({
+        where: {
+          hostId_hostPort: { hostId: hostId, hostPort: port.hostPort },
+        },
+        data: {
+          vmId: null,
+          status: "AVAILABLE",
+        },
+      });
+    });
+  }
 };
