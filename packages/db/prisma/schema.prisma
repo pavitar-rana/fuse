@@ -90,7 +90,7 @@ enum PoolStatus {
 model Host {
   id String @id @default(cuid())
   hostname String @unique
-  ipRange String 
+  ipRange String
   ipPool IpPool[]
   portPool PortPool[]
   vms Virtualmachine[]
