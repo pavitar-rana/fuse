@@ -5,6 +5,7 @@ import { serviceError } from "./index.ts";
 import * as vmRepository from "../repositories/vm.repository.ts";
 import { getCurrentHost } from "../config/host.ts";
 import { setupHostPort } from "../firecracker/firecracker.network.ts";
+import { env } from "../config/env.ts";
 
 export const createVm = async (userId: string, config: VmConfigType) => {
   try {
@@ -68,7 +69,7 @@ export const getVmUrl = async (
     if (!vm) throw serviceError("Vm not found", 500);
 
     const host = await getCurrentHost();
-    const addrPrefix = process.env.ADDR_PREFIX;
+    const addrPrefix = env.addrPrefix;
 
     const portMap = await vmRepository.findPortMapping(vm.id, vmm.port);
 
