@@ -20,6 +20,17 @@ export const getUserInfo = async (id: string) => {
     where: {
       userId: id,
     },
+    include: {
+      portMappings: true,
+      host: {
+        select: {
+          hostname: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
   });
 
   if (vms.length == 0) {

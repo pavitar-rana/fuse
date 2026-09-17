@@ -26,9 +26,9 @@ const deleteFireCrackerController: RequestHandler = async (req, res) => {
 };
 const getVmUrlController: RequestHandler = async (req, res) => {
   try {
-    const { userId, ip, id, port } = req.body;
+    const { userId, id, port } = req.body;
 
-    const response = await getVmUrl(userId, { ip, id, port });
+    const response = await getVmUrl(userId, { id, port });
     return res.status(201).json(response);
   } catch (c) {
     res.status(c.status ?? 500).json({
