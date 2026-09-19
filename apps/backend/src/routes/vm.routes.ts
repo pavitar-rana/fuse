@@ -2,13 +2,13 @@ import { Router } from "express";
 import {
     createFireCrackerController,
     deleteFireCrackerController,
-    hostFireCrackerController,
+    getVmUrlController,
 } from "../controller/createVM.controller.ts";
 
 const router = Router();
 
 router.post("/create", createFireCrackerController);
 router.post("/delete", deleteFireCrackerController);
-router.post("/get-host", hostFireCrackerController);
+router.post("/get-host", getVmUrlController);
 
 export default router;

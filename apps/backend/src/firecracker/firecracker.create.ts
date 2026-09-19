@@ -25,7 +25,7 @@ export const createFireCracker = async (config: VmConfigType) => {
   const vmRootfs = `/tmp/vm-${vmId}.ext4`;
 
   try {
-    execSync(`cp "${config.rootfsPath}" "${vmRootfs}"`);
+    execSync(`cp --reflink=auto "${config.rootfsPath}" "${vmRootfs}"`);
   } catch (err) {
     console.error("Failed to create rootfs copy:", err);
     throw new Error("Failed to create VM rootfs");

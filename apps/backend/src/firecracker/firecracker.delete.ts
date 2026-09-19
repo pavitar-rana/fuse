@@ -4,7 +4,7 @@ import type { clientType } from "../lib/types.ts";
 import { createFirecrackerClient, deleteVmPortMap } from "./index.ts";
 import { getRedisClient } from "../helpers/redis/index.ts";
 import { disconnectSSH } from "../helpers/ssh/index.ts";
-import { PortMapping, Virtualmachine } from "@fuse/db/client";
+import type { PortMapping, Virtualmachine } from "@fuse/db/client";
 import { getCurrentHost } from "../config/host.ts";
 
 dotenv.config();

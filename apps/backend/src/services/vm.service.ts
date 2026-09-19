@@ -1,5 +1,5 @@
 import { createFireCracker } from "../firecracker/firecracker.create.ts";
-import { VmConfigType } from "../lib/types.ts";
+import type { VmConfigType } from "../lib/types.ts";
 import { deleteFireCracker } from "../firecracker/firecracker.delete.ts";
 import { serviceError } from "./index.ts";
 import * as vmRepository from "../repositories/vm.repository.ts";

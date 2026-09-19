@@ -1,5 +1,5 @@
 import { prisma } from "@fuse/db";
-import { PortMapping } from "@fuse/db/client";
+import type { PortMapping } from "@fuse/db/client";
 import crypto from "crypto";
 import { deleteHostPort } from "./firecracker.network.ts";
 
