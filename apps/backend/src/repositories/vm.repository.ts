@@ -63,7 +63,7 @@ export const getVmIP = async (vmId: string, hostId: string) => {
   return prisma.$transaction(async (tx) => {
     const [row] = await tx.$queryRaw<
       { id: string; ip: string }[]
-    >`SELECT id, ip FROM "IpPool" WHERE status = "AVAILABLE" LIMIT 1 FOR UPDATE SKIP LOCKED`;
+    >`SELECT id, ip FROM "IpPool" WHERE "hostId" = ${hostId} AND status = 'AVAILABLE' LIMIT 1 FOR UPDATE SKIP LOCKED`;
 
     if (!row) throw new Error("No ip AVAILABLE");
     await tx.ipPool.update({

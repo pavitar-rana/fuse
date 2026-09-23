@@ -1,7 +1,6 @@
 import NextAuth from "next-auth";
-import Resend from "next-auth/providers/resend";
-import { PrismaAdapter } from "@auth/prisma-adapter";
-import { prisma } from "./lib/prisma";
+import Google from "next-auth/providers/google";
+import { prisma } from "@fuse/db";
 import crypto from "crypto";
 
 // Generate a secure random API key
@@ -10,36 +9,38 @@ function generateApiKey(): string {
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  adapter: {
-    ...PrismaAdapter(prisma),
-    createUser: async (user) => {
-      return prisma.user.create({
-        data: {
-          ...user,
-          apiKey: generateApiKey(),
-        },
-      });
-    },
-  },
-
-  providers: [
-    Resend({
-      from: "no-reply@pomogolo.ninja",
-    }),
-  ],
+  // Reads AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET from env
+  providers: [Google],
   session: {
     strategy: "jwt",
     maxAge: 60 * 60 * 24 * 7, // 7 days
     updateAge: 60 * 60 * 2, // 2 hours
   },
   callbacks: {
+    async signIn({ user }) {
+      if (!user.email) return false;
+      return true;
+    },
     async jwt({ token, user }) {
-      if (user) token.id = user.id;
+      // `user` is only set on sign-in: find or create our DB user by email
+      if (user?.email) {
+        const dbUser = await prisma.user.upsert({
+          where: { email: user.email },
+          update: {},
+          create: {
+            email: user.email,
+            name: user.name,
+            image: user.image,
+            emailVerified: new Date(),
+            apiKey: generateApiKey(),
+          },
+        });
+        token.id = dbUser.id;
+      }
       return token;
     },
     async session({ session, token }) {
       if (session.user) session.user.id = typeof token.id === "string" ? token.id : "";
-
       return session;
     },
   },

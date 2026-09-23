@@ -1,6 +1,6 @@
 import { auth, signIn } from "@/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Mail, Server, Zap, Lock, Cpu } from "lucide-react";
+import { Server, Zap, Lock, Cpu } from "lucide-react";
 import { redirect } from "next/navigation";
 
 const SignInPage = async () => {
@@ -77,39 +77,16 @@ const SignInPage = async () => {
             </CardHeader>
             <CardContent>
               <form
-                action={async (formData) => {
+                action={async () => {
                   "use server";
-                  await signIn("resend", formData);
+                  await signIn("google", { redirectTo: "/" });
                 }}
-                className="space-y-4"
               >
-                <div className="space-y-2">
-                  <label
-                    htmlFor="email"
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                    <input
-                      id="email"
-                      type="email"
-                      name="email"
-                      placeholder="Enter your email address"
-                      required
-                      className="flex h-12 w-full rounded-lg border border-input bg-background pl-11 pr-4 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">We{"'"}ll send you a magic link to sign in securely</p>
-                </div>
-
                 <button
                   type="submit"
                   className="w-full h-12 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg font-semibold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-xl flex items-center justify-center space-x-2"
                 >
-                  <Mail className="h-5 w-5" />
-                  <span>Sign In with Email</span>
+                  <span>Continue with Google</span>
                 </button>
               </form>
 
