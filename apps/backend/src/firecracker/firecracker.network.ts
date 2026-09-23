@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { env } from "../config/env.ts";
 
 export const setupHostPort = async (
   vmIP: string,
@@ -39,7 +40,7 @@ export const setupTapInterface = async (tap: string): Promise<void> => {
   execSync(`sudo sysctl -w net.ipv4.ip_forward=1`);
 
   execSync(
-    `sudo iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null || sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE`,
+    `sudo iptables -t nat -C POSTROUTING -o ${env.uplinkIface} -j MASQUERADE 2>/dev/null || sudo iptables -t nat -A POSTROUTING -o ${env.uplinkIface} -j MASQUERADE`,
   );
   execSync(
     `sudo iptables -C FORWARD -i br0 -j ACCEPT 2>/dev/null || sudo iptables -A FORWARD -i br0 -j ACCEPT`,

@@ -2,13 +2,14 @@ import { exec, execSync, spawn } from "child_process";
 import fs from "fs";
 import { getRedisClient } from "../helpers/redis/index.ts";
 import { delay } from "../lib/delayHelper.ts";
+import { env } from "../config/env.ts";
 
 const redisClient = await getRedisClient();
 
 export const setupSocket = async (api_socket: string, id: string) => {
   const fc = spawn(
     "sudo",
-    ["/home/pavitar/firecracker", "--api-sock", api_socket],
+    [env.firecrackerBin, "--api-sock", api_socket],
     {
       stdio: ["ignore", "inherit", "inherit"],
       detached: true,

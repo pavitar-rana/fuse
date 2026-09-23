@@ -15,6 +15,7 @@ import type { VmConfigType, clientType, IPConfig } from "../lib/types.ts";
 import { createFirecrackerClient } from "./index.ts";
 import { getVmIP } from "../repositories/vm.repository.ts";
 import { getCurrentHost } from "../config/host.ts";
+import { env } from "../config/env.ts";
 
 export const createFireCracker = async (config: VmConfigType) => {
   if (!config.kernelImage || !config.rootfsPath) {
@@ -22,7 +23,7 @@ export const createFireCracker = async (config: VmConfigType) => {
   }
   const vmId = createId();
   const host = await getCurrentHost();
-  const vmRootfs = `/tmp/vm-${vmId}.ext4`;
+  const vmRootfs = `${env.vmDir}/vm-${vmId}.ext4`;
 
   try {
     execSync(`cp --reflink=auto "${config.rootfsPath}" "${vmRootfs}"`);

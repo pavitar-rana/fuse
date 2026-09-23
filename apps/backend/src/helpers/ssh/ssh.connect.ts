@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import { Client } from "ssh2";
 import { connections } from "./index.ts";
+import { env } from "../../config/env.ts";
 
 export const connectSSH = (host: string) => {
     return new Promise((resolve, reject) => {
@@ -40,7 +41,7 @@ export const connectSSH = (host: string) => {
                 host,
                 port: 22,
                 username: "root",
-                privateKey: readFileSync("/home/pavitar/.ssh/id_rsa"),
+                privateKey: readFileSync(env.vmSshKey),
                 readyTimeout: 30000,
             });
     });

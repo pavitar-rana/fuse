@@ -12,8 +12,8 @@ export const createVm = async (userId: string, config: VmConfigType) => {
     if (!userId) throw serviceError("userId is required", 400);
 
     const sbx = await createFireCracker({
-      kernelImage: "/home/pavitar/vmlinux-6.1.141",
-      rootfsPath: "/home/pavitar/ubuntu-1.5G.ext4",
+      kernelImage: env.kernelImage,
+      rootfsPath: env.rootfsGolden,
       memSize: config.memSize,
       vcpuCount: config.vcpuCount,
     });
