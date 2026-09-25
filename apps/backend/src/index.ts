@@ -10,6 +10,6 @@ app.use(cors());
 app.use("/firecracker", vmRoute);
 app.use("/firecracker/exec", execRoute);
 
-app.listen(8080, "0.0.0.0", () => {
-  console.log("Server running on port : 8080");
+app.listen(4000, "127.0.0.1", () => {
+  console.log("Server running on port : 4000");
 });
