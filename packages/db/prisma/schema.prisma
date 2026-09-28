@@ -12,7 +12,8 @@ model User {
   name           String?
   email          String           @unique
   emailVerified  DateTime?
-  apiKey         String?
+  apiKeyHash     String?          @unique
+  apiKeyPrefix   String?
   image          String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -37,19 +38,19 @@ model VerificationToken {
   @@id([identifier, token])
 }
 
-
 enum VmStatus {
   CREATING
   RUNNING
+  PAUSING
   PAUSED
+  RESUMING
   TERMINATING
   TERMINATED
   FAILED
 }
 
-
 model Virtualmachine {
-  id         String @id @default(cuid())
+  id         String   @id @default(cuid())
   vmIp       String
   vmMac      String
   socket     String
@@ -58,8 +59,9 @@ model Virtualmachine {
   vcpuCount  Int
   memSize    Int
   status     VmStatus @default(CREATING)
-  hostId String
-  host Host @relation(fields: [hostId], references:[id])
+  pid        Int?
+  hostId     String
+  host       Host     @relation(fields: [hostId], references: [id])
 
   portMappings PortMapping[]
 
@@ -88,35 +90,34 @@ enum PoolStatus {
 }
 
 model Host {
-  id String @id @default(cuid())
-  hostname String @unique
-  ipRange String
-  ipPool IpPool[]
+  id       String           @id @default(cuid())
+  hostname String           @unique
+  ipRange  String
+  ipPool   IpPool[]
   portPool PortPool[]
-  vms Virtualmachine[]
+  vms      Virtualmachine[]
 }
 
-
 model IpPool {
-
-  id String @id @default(cuid())
+  id     String     @id @default(cuid())
   hostId String
-  host Host @relation(fields: [hostId], references:[id] )
-  ip String
+  host   Host       @relation(fields: [hostId], references: [id])
+  ip     String
   status PoolStatus @default(AVAILABLE)
-  vmId String? @unique
+  vmId   String?    @unique
 
   @@unique([hostId, ip])
   @@index([hostId, status])
 }
 
 model PortPool {
-    id String @id @default(cuid())
-    hostId String
-    host Host @relation(fields: [hostId], references: [id])
-    hostPort Int
-    status PoolStatus @default(AVAILABLE)
-    vmId String?
-    @@unique([hostId, hostPort])
-    @@index([hostId, status])
+  id       String     @id @default(cuid())
+  hostId   String
+  host     Host       @relation(fields: [hostId], references: [id])
+  hostPort Int
+  status   PoolStatus @default(AVAILABLE)
+  vmId     String?
+
+  @@unique([hostId, hostPort])
+  @@index([hostId, status])
 }

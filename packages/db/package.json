@@ -6,6 +6,7 @@
   "main": "index.js",
   "exports": {
     ".": "./lib/prisma.ts",
+    "./api-key": "./lib/api-key.ts",
     "./client": "./src/generated/prisma/client.ts"
   },
   "scripts": {
