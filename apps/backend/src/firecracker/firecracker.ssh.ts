@@ -1,42 +1,33 @@
 import { delay } from "../lib/delayHelper.ts";
 import { connectSSH } from "../helpers/ssh/index.ts";
 
-let connected = false;
-let lastErr: any = null;
 export const attemptSSHConnection = async ({
   maxRetries = 10,
   vmIP,
   baseDelay = 1000,
+}: {
+  maxRetries?: number;
+  vmIP: string;
+  baseDelay?: number;
 }) => {
-  console.log(`\n Waiting for SSH to become available at ${vmIP}:22...`);
-  console.log(`Max retries: ${maxRetries}, Base delay: ${baseDelay}ms\n`);
+  let lastErr: unknown = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    console.log(
-      `[${attempt}/${maxRetries}] Trying SSH connection to ${vmIP}...`,
-    );
     try {
       await connectSSH(vmIP);
-      connected = true;
-      console.log(`\n SSH connected successfully on attempt ${attempt}!\n`);
-      break;
+      if (attempt > 1) console.log(`SSH to ${vmIP} connected on attempt ${attempt}`);
+      return;
     } catch (err) {
       lastErr = err;
       const backoff = baseDelay * Math.min(attempt, 5);
       console.log(
-        `Connection failed: ${err instanceof Error ? err.message : String(err)}`,
+        `[${attempt}/${maxRetries}] SSH to ${vmIP} failed: ${err instanceof Error ? err.message : String(err)}; retrying in ${backoff}ms`,
       );
-      console.log(`Retrying in ${backoff}ms...\n`);
-      await delay(backoff);
+      if (attempt < maxRetries) await delay(backoff);
     }
   }
 
-  if (!connected) {
-    const errMsg = `Failed to connect to SSH after ${maxRetries} attempts. Last error: ${String(lastErr)}`;
-    console.error(errMsg);
-    throw new Error(errMsg);
-  }
-
-  // await new Promise((resolve) => setTimeout(resolve, 2000));
-  // await connectSSH()
+  throw new Error(
+    `Failed to connect to SSH after ${maxRetries} attempts. Last error: ${String(lastErr)}`,
+  );
 };

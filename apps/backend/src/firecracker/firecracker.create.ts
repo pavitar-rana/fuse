@@ -1,86 +1,118 @@
 import { createId } from "@paralleldrive/cuid2";
-import { execSync } from "child_process";
-import {
-  macFromCuid,
-  HOST_GATEWAY_IP,
-  setupTapInterface,
-  setupSocket,
-  attemptSSHConnection,
-  bootSetup,
-  configSetup,
-  startInstance,
-  setupHostPort,
-} from "../firecracker/index.ts";
-import type { VmConfigType, clientType, IPConfig } from "../lib/types.ts";
-import { createFirecrackerClient } from "./index.ts";
-import { getVmIP } from "../repositories/vm.repository.ts";
+import type { IPConfig } from "../lib/types.ts";
+import { createFirecrackerClient } from "./firecracker.client.ts";
+import { bootSetup, startInstance } from "./firecracker.boot.ts";
+import { configSetup } from "./firecracker.config.ts";
+import { setupTapInterface, tapName } from "./firecracker.network.ts";
+import { startFirecracker } from "./firecracker.process.ts";
+import { attemptSSHConnection } from "./firecracker.ssh.ts";
+import { HOST_GATEWAY_IP, macFromCuid, socketPath } from "./firecracker.utils.ts";
+import { teardownVm } from "./firecracker.delete.ts";
+import * as vmRepository from "../repositories/vm.repository.ts";
 import { getCurrentHost } from "../config/host.ts";
 import { env } from "../config/env.ts";
+import { run } from "../lib/sh.ts";
+import { runCommandfn, shellQuote } from "../helpers/ssh/index.ts";
 
-export const createFireCracker = async (config: VmConfigType) => {
-  if (!config.kernelImage || !config.rootfsPath) {
-    throw new Error("Missing kernelImage or rootfsPath in config");
-  }
+// The kernel `ip=` boot arg sets the address and route but not DNS, so point
+// the guest at public resolvers once SSH is up. Uses a systemd-resolved
+// drop-in when resolved is running, a static resolv.conf otherwise.
+const configureGuestDns = async (vmIP: string, nameservers: string[]) => {
+  const resolvedConf = shellQuote(`[Resolve]\nDNS=${nameservers.join(" ")}\n`);
+  const resolvConf = shellQuote(nameservers.map((n) => `nameserver ${n}\n`).join(""));
+  await runCommandfn(
+    `if systemctl is-active -q systemd-resolved 2>/dev/null; then ` +
+      `mkdir -p /etc/systemd/resolved.conf.d && ` +
+      `printf ${resolvedConf} > /etc/systemd/resolved.conf.d/fuse-dns.conf && ` +
+      `systemctl restart systemd-resolved; ` +
+      `else rm -f /etc/resolv.conf && printf ${resolvConf} > /etc/resolv.conf; fi`,
+    vmIP,
+  );
+};
+
+type CreateInput = {
+  userId: string;
+  memSize: number;
+  vcpuCount: number;
+  sshMaxRetries?: number;
+  sshBaseDelayMs?: number;
+};
+
+// State machine: row inserted as CREATING → RUNNING on success. On any
+// failure everything acquired so far is torn down and the row is marked FAILED.
+export const createFireCracker = async (input: CreateInput) => {
   const vmId = createId();
   const host = await getCurrentHost();
+  const api_socket = socketPath(vmId);
   const vmRootfs = `${env.vmDir}/vm-${vmId}.ext4`;
-
-  try {
-    execSync(`cp --reflink=auto "${config.rootfsPath}" "${vmRootfs}"`);
-  } catch (err) {
-    console.error("Failed to create rootfs copy:", err);
-    throw new Error("Failed to create VM rootfs");
-  }
-
-  const api_socket = `/tmp/firecracker-${vmId}.socket`;
-  const client: clientType = createFirecrackerClient(api_socket);
-
-  const vmIP = await getVmIP(vmId, host.id);
-  const tap = `tap_${vmId.slice(0, 8)}`;
+  const tap = tapName(vmId);
   const mac = macFromCuid(vmId);
 
-  if (!mac || !vmIP) {
-    throw new Error("Cant generate mac address or VM IP");
+  const vmIP = await vmRepository.allocateVmIP(vmId, host.id);
+
+  let vm;
+  try {
+    vm = await vmRepository.insertVm({
+      id: vmId,
+      userId: input.userId,
+      hostId: host.id,
+      vmIp: vmIP,
+      vmMac: mac,
+      socket: api_socket,
+      rootfsPath: vmRootfs,
+      vcpuCount: input.vcpuCount,
+      memSize: input.memSize,
+    });
+  } catch (err) {
+    await vmRepository.releaseVmIP(vmId);
+    throw err;
   }
 
-  const ipConfig: IPConfig = {
-    vmIP: vmIP,
-    hostIP: HOST_GATEWAY_IP,
-    gateway: HOST_GATEWAY_IP,
-    netmask: "255.255.255.0",
-    nameservers: ["8.8.8.8", "8.8.4.4"],
-  };
+  let pid: number | null = null;
+  try {
+    await run("cp", ["--reflink=auto", env.rootfsGolden, vmRootfs]);
+    await setupTapInterface(tap);
 
-  await setupTapInterface(tap);
-  await setupSocket(api_socket, vmId);
+    await startFirecracker(api_socket, (pgid) => {
+      pid = pgid; // set before the DB write so rollback can still kill it
+      return vmRepository.updateVm(vmId, { pid: pgid });
+    });
 
-  await bootSetup({
-    ipConfig,
-    client,
-    config: { ...config, rootfsPath: vmRootfs },
-    mac,
-    tap,
-  });
+    const client = createFirecrackerClient(api_socket);
+    const ipConfig: IPConfig = {
+      vmIP,
+      hostIP: HOST_GATEWAY_IP,
+      gateway: HOST_GATEWAY_IP,
+      netmask: "255.255.255.0",
+      nameservers: ["8.8.8.8", "8.8.4.4"],
+    };
 
-  await configSetup(client, config);
-  await startInstance(client);
+    await bootSetup({
+      ipConfig,
+      client,
+      config: { kernelImage: env.kernelImage, rootfsPath: vmRootfs },
+      mac,
+      tap,
+    });
+    await configSetup(client, input);
+    await startInstance(client);
 
-  const maxRetries = config.sshMaxRetries ?? 10;
-  const baseDelay = config.sshBaseDelayMs ?? 1000;
-  await attemptSSHConnection({
-    maxRetries,
-    baseDelay,
-    vmIP,
-  });
+    await attemptSSHConnection({
+      maxRetries: input.sshMaxRetries ?? 10,
+      baseDelay: input.sshBaseDelayMs ?? 1000,
+      vmIP,
+    });
+    await configureGuestDns(vmIP, ipConfig.nameservers);
 
-  return {
-    vmId,
-    vmIP,
-    vmMac: mac,
-    hostId: host.id,
-    socket: api_socket,
-    vcpuCount: config.vcpuCount,
-    memSize: config.memSize,
-    rootfsPath: vmRootfs,
-  };
+    return await vmRepository.updateVm(vmId, { status: "RUNNING" });
+  } catch (err) {
+    console.error(`Create ${vmId} failed, rolling back:`, err);
+    try {
+      await teardownVm({ ...vm, pid: pid ?? vm.pid });
+      await vmRepository.updateVm(vmId, { status: "FAILED", pid: null });
+    } catch (cleanupErr) {
+      console.error(`Rollback of ${vmId} incomplete:`, cleanupErr);
+    }
+    throw err;
+  }
 };

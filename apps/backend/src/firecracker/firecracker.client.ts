@@ -10,5 +10,7 @@ export const createFirecrackerClient = (socketPath: string) => {
         get: <T>(path: string) => instance.get<T>(path).then((r) => r.data),
         put: <T>(path: string, data: any) =>
             instance.put<T>(path, data).then((r) => r.data),
+        patch: <T>(path: string, data: any) =>
+            instance.patch<T>(path, data).then((r) => r.data),
     };
 };

@@ -1,6 +1,7 @@
 export type clientType = {
   put: <T>(path: string, data: any) => Promise<T>;
   get: <T>(path: string) => Promise<T>;
+  patch: <T>(path: string, data: any) => Promise<T>;
 };
 export type VmConfigType = {
   kernelImage?: string;
