@@ -1,67 +1,51 @@
 import { readFileSync } from "fs";
 import { Client } from "ssh2";
-import { connections } from "./index.ts";
+import { connections } from "./ssh.client.ts";
 import { env } from "../../config/env.ts";
 
+// Remove the map entry only if it still belongs to this connection, so the
+// close/error handler of an old attempt can't evict a newer one.
+const forget = (host: string, conn: Client) => {
+  if (connections.get(host)?.conn === conn) connections.delete(host);
+};
+
 export const connectSSH = (host: string) => {
-    return new Promise((resolve, reject) => {
-        if (!host) return reject("Host not provided");
+  return new Promise<Client>((resolve, reject) => {
+    if (!host) return reject(new Error("Host not provided"));
 
-        const existing = connections.get(host);
-        if (existing && existing.isReady) {
-            console.log(`Reusing existing SSH connection to ${host}`);
-            return resolve(existing.conn);
-        }
+    const existing = connections.get(host);
+    if (existing?.isReady) return resolve(existing.conn);
+    // A half-open attempt from earlier: drop it and start fresh.
+    if (existing) existing.conn.end();
 
-        console.log(`Creating new SSH connection to ${host}`);
-        const conn = new Client();
+    const conn = new Client();
+    connections.set(host, { conn, isReady: false });
 
-        connections.set(host, { conn, isReady: false });
-
-        conn.removeAllListeners();
-
-        conn.on("ready", () => {
-            console.log(`SSH Client ready for ${host}`);
-            const entry = connections.get(host);
-            if (entry) {
-                entry.isReady = true;
-            }
-            resolve(conn);
-        })
-            .on("error", (err) => {
-                console.error(`SSH Connection error for ${host}:`, err.message);
-                connections.delete(host);
-                reject(new Error(`Failed to connect to SSH: ${err.message}`));
-            })
-            .on("close", () => {
-                console.log(`SSH connection closed for ${host}`);
-                connections.delete(host);
-            })
-            .connect({
-                host,
-                port: 22,
-                username: "root",
-                privateKey: readFileSync(env.vmSshKey),
-                readyTimeout: 30000,
-            });
-    });
+    conn
+      .on("ready", () => {
+        const entry = connections.get(host);
+        if (entry?.conn === conn) entry.isReady = true;
+        resolve(conn);
+      })
+      .on("error", (err) => {
+        forget(host, conn);
+        reject(new Error(`Failed to connect to SSH: ${err.message}`));
+      })
+      .on("close", () => forget(host, conn))
+      .connect({
+        host,
+        port: 22,
+        username: "root",
+        privateKey: readFileSync(env.vmSshKey),
+        readyTimeout: 30000,
+      });
+  });
 };
 
 export const disconnectSSH = (host?: string) => {
-    if (host) {
-        const entry = connections.get(host);
-        if (entry && entry.isReady) {
-            entry.conn.end();
-            connections.delete(host);
-            console.log(`SSH disconnected from ${host}`);
-        }
-    } else {
-        for (const [host, entry] of connections.entries()) {
-            if (entry.isReady) {
-                entry.conn.end();
-            }
-        }
-        connections.clear();
-        console.log("All SSH connections disconnected");
-    }
+  const hosts = host ? [host] : [...connections.keys()];
+  for (const h of hosts) {
+    connections.get(h)?.conn.end();
+    connections.delete(h);
+  }
 };

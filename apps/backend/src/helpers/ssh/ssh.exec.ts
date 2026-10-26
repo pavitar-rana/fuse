@@ -1,66 +1,58 @@
-import { connections } from "./index.ts";
+import { connections } from "./ssh.client.ts";
 import pathModule from "path";
 
-export const runCommandfn = async (
-  command: string,
-  host: string,
-  path?: string,
-) => {
-  const vmHost = host;
-  if (!vmHost) {
-    throw new Error("No SSH connection available. Call connectSSH first.");
+// POSIX single-quote escaping: 'it'\''s' → it's
+export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+const NVM_INIT = `export NVM_DIR="/root/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"`;
+
+const execOnHost = (host: string, command: string, stdin?: string) => {
+  const entry = connections.get(host);
+  if (!entry?.isReady) {
+    return Promise.reject(new Error(`Not connected to SSH for host ${host}`));
   }
 
-  const entry = connections.get(vmHost);
-  if (!entry || !entry.isReady) {
-    throw new Error(`Not connected to SSH for host ${vmHost}`);
-  }
-
-  return new Promise((resolve, reject) => {
-    console.log(`Running command on ${vmHost} in path: ${path || "default"}`);
-    const nvmInit = `export NVM_DIR="/root/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"`;
-
-    const finalCommand = path
-      ? `${nvmInit} && mkdir -p '${path}' && cd '${path}' && ${command}`
-      : `${nvmInit} && ${command}`;
-
-    entry.conn.exec(finalCommand, (err, stream) => {
+  return new Promise<string>((resolve, reject) => {
+    entry.conn.exec(command, (err, stream) => {
       if (err) return reject(err);
 
       let output = "";
       let error = "";
 
       stream
-        .on("close", (code: number, signal: unknown) => {
+        .on("close", (code: number) => {
           if (code === 0) resolve(output.trim());
-          else reject(new Error(`Command failed: ${error || output}`));
+          else reject(new Error(`Command failed (exit ${code}): ${error || output}`));
         })
         .on("data", (data: Buffer) => (output += data.toString()))
         .stderr.on("data", (data: Buffer) => (error += data.toString()));
+
+      if (stdin !== undefined) stream.end(stdin);
     });
   });
 };
 
+// `command` is user-supplied shell on purpose (it's their sandbox); only the
+// path we wrap it with is quoted.
+export const runCommandfn = async (command: string, host: string, path?: string) => {
+  const finalCommand = path
+    ? `${NVM_INIT} && mkdir -p ${shellQuote(path)} && cd ${shellQuote(path)} && ${command}`
+    : `${NVM_INIT} && ${command}`;
+  return execOnHost(host, finalCommand);
+};
+
 export const createDirfn = async (path: string, host: string) => {
-  await runCommandfn(`mkdir -p '${path}'`, host);
+  await execOnHost(host, `mkdir -p ${shellQuote(path)}`);
   return "Directory created";
 };
 
-export const writeFilefn = async (
-  path: string,
-  content: string,
-  host: string,
-) => {
-  const parentDir = pathModule.dirname(path);
-  await runCommandfn(`mkdir -p '${parentDir}'`, host);
-
-  // Encode file content into base64 safely
-  const base64 = Buffer.from(content, "utf8").toString("base64");
-
-  // Send base64 string and decode remotely
-  const command = `bash -lc "echo '${base64}' | base64 -d > '${path}'"`;
-
-  await runCommandfn(command, host);
-
-  return runCommandfn(`ls -la '${parentDir}'`, host);
+// Content goes over stdin, not argv, so file size isn't capped by ARG_MAX.
+export const writeFilefn = async (path: string, content: string, host: string) => {
+  const parentDir = pathModule.posix.dirname(path);
+  await execOnHost(
+    host,
+    `mkdir -p ${shellQuote(parentDir)} && cat > ${shellQuote(path)}`,
+    content,
+  );
+  return execOnHost(host, `ls -la ${shellQuote(parentDir)}`);
 };
