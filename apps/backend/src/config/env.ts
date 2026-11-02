@@ -15,4 +15,7 @@ export const env = {
   vmDir: requireEnv("VM_DIR"),
   vmSshKey: requireEnv("VM_SSH_KEY"),
   uplinkIface: requireEnv("UPLINK_IFACE"),
+  // Shared with the dashboard so its server actions can call the API on a
+  // signed-in user's behalf. Optional: unset disables that auth path.
+  internalApiSecret: process.env.INTERNAL_API_SECRET ?? "",
 } as const;
