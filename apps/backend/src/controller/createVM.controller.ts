@@ -1,44 +1,33 @@
 import type { RequestHandler } from "express";
-import { createVm, deleteVm, getVmUrl } from "../services/vm.service.ts";
+import { createVm, deleteVm, getVmUrl, pauseVm, resumeVm } from "../services/vm.service.ts";
 
+// Express 5 forwards rejected promises to the error middleware, so handlers
+// don't need their own try/catch.
 const createFireCrackerController: RequestHandler = async (req, res) => {
-  try {
-    const { userId, config } = req.body;
-    const vm = await createVm(userId, config);
-    return res.status(201).json(vm);
-  } catch (e) {
-    res.status(e.status ?? 500).json({
-      message: e.message ?? "Internal Server error",
-    });
-  }
+  res.status(201).json(await createVm(req.userId, req.body?.config));
 };
 
 const deleteFireCrackerController: RequestHandler = async (req, res) => {
-  try {
-    const { id, userId } = req.body;
-    const response = deleteVm(id, userId);
-    return res.status(201).json(response);
-  } catch (e) {
-    res.status(e.status ?? 500).json({
-      message: e.message ?? "Internal Server error",
-    });
-  }
+  res.status(200).json(await deleteVm(req.userId, req.body?.id));
 };
-const getVmUrlController: RequestHandler = async (req, res) => {
-  try {
-    const { userId, id, port } = req.body;
 
-    const response = await getVmUrl(userId, { id, port });
-    return res.status(201).json(response);
-  } catch (c) {
-    res.status(c.status ?? 500).json({
-      message: c.message ?? "Internal service error",
-    });
-  }
+const pauseVmController: RequestHandler = async (req, res) => {
+  res.status(200).json(await pauseVm(req.userId, req.body?.id));
+};
+
+const resumeVmController: RequestHandler = async (req, res) => {
+  res.status(200).json(await resumeVm(req.userId, req.body?.id));
+};
+
+const getVmUrlController: RequestHandler = async (req, res) => {
+  const { id, port } = req.body ?? {};
+  res.status(200).json(await getVmUrl(req.userId, { id, port }));
 };
 
 export {
   createFireCrackerController,
   deleteFireCrackerController,
   getVmUrlController,
+  pauseVmController,
+  resumeVmController,
 };
