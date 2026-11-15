@@ -38,8 +38,13 @@ import {
   Network,
 } from "lucide-react";
 import { getUserInfo } from "@/actions/get-user-info";
-import axios from "axios";
-import { User, Virtualmachine } from "@fuse/db/client";
+import { rotateApiKey } from "@/actions/api-key";
+import {
+  createVm as createVmAction,
+  deleteVm as deleteVmAction,
+  pauseVm as pauseVmAction,
+  resumeVm as resumeVmAction,
+} from "@/actions/vm";
 
 type PortMapping = {
   id: string;
@@ -47,31 +52,34 @@ type PortMapping = {
   hostPort: number;
 };
 
-type VmWithRelations = Virtualmachine & {
-  portMappings?: PortMapping[];
-  host?: { hostname: string } | null;
-};
+type UserInfo = Awaited<ReturnType<typeof getUserInfo>>;
+type VmWithRelations = UserInfo["vms"][number];
+type DashboardUser = NonNullable<UserInfo["user"]>;
 
 const Home = () => {
   const { data: session, status } = useSession();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [user, setUser] = useState<User>();
+  const [user, setUser] = useState<DashboardUser>();
+  const [error, setError] = useState<string | null>(null);
   const [copiedVmId, setCopiedVmId] = useState<string | null>(null);
 
   const [vms, setVms] = useState<VmWithRelations[]>();
   const [vmsLoading, setVmsLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const fetchUserInfo = async () => {
     if (!session?.user?.id) return;
     setVmsLoading(true);
     try {
-      const userInfo = await getUserInfo(session.user.id);
+      const userInfo = await getUserInfo();
       if (userInfo.user) setUser(userInfo.user);
-      setVms((userInfo.vms as VmWithRelations[]) ?? []);
+      setVms(userInfo.vms);
+    } catch {
+      setError("Failed to load your VMs");
     } finally {
       setVmsLoading(false);
     }
@@ -91,10 +99,12 @@ const Home = () => {
   };
 
   const generateApiKey = async () => {
-    // TODO: Replace with actual API call to generate key
-    const newKey = `fc_${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`;
-    setApiKey(newKey);
+    setError(null);
+    const res = await rotateApiKey();
+    if (!res.ok) return setError(res.message);
+    setApiKey(res.key);
     setIsDialogOpen(true);
+    await fetchUserInfo();
   };
 
   const copyToClipboard = async () => {
@@ -111,8 +121,12 @@ const Home = () => {
         return <Badge variant="success">Running</Badge>;
       case "CREATING":
         return <Badge variant="warning">Creating</Badge>;
+      case "PAUSING":
+        return <Badge variant="warning">Pausing</Badge>;
       case "PAUSED":
         return <Badge variant="secondary">Paused</Badge>;
+      case "RESUMING":
+        return <Badge variant="warning">Resuming</Badge>;
       case "TERMINATING":
         return <Badge variant="warning">Terminating</Badge>;
       case "TERMINATED":
@@ -127,19 +141,10 @@ const Home = () => {
   const createVm = async () => {
     if (!session?.user?.id) return;
     setCreating(true);
+    setError(null);
     try {
-      await axios.post(
-        "https://firecracker.pavitr.cloud/api/firecracker/create",
-        {
-          userId: session.user.id,
-          config: {
-            kernelImage: "./vmlinux-6.1.141",
-            rootfsPath: "./ubuntu-nodejs.ext4",
-            memSize: 512,
-            vcpuCount: 1,
-          },
-        },
-      );
+      const res = await createVmAction({ memSize: 512, vcpuCount: 1 });
+      if (!res.ok) setError(`Create failed: ${res.message}`);
       await fetchUserInfo();
     } finally {
       setCreating(false);
@@ -149,17 +154,26 @@ const Home = () => {
   const deleteVm = async (id: string) => {
     if (!session?.user?.id) return;
     setDeletingId(id);
+    setError(null);
     try {
-      await axios.post(
-        "https://firecracker.pavitr.cloud/api/firecracker/delete",
-        {
-          id,
-          userId: session.user.id,
-        },
-      );
+      const res = await deleteVmAction(id);
+      if (!res.ok) setError(`Delete failed: ${res.message}`);
       await fetchUserInfo();
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const togglePause = async (vm: VmWithRelations) => {
+    setTogglingId(vm.id);
+    setError(null);
+    try {
+      const pausing = vm.status === "RUNNING";
+      const res = pausing ? await pauseVmAction(vm.id) : await resumeVmAction(vm.id);
+      if (!res.ok) setError(`${pausing ? "Pause" : "Resume"} failed: ${res.message}`);
+      await fetchUserInfo();
+    } finally {
+      setTogglingId(null);
     }
   };
 
@@ -185,11 +199,30 @@ const Home = () => {
             </p>
           )}
         </div>
-        <Button onClick={generateApiKey} size="lg">
-          <Key className="mr-2 h-4 w-4" />
-          Generate API Key
-        </Button>
+        <div className="flex items-center gap-3">
+          {user?.apiKeyPrefix && (
+            <code className="text-xs text-muted-foreground">
+              {user.apiKeyPrefix}…
+            </code>
+          )}
+          <Button onClick={generateApiKey} size="lg">
+            <Key className="mr-2 h-4 w-4" />
+            {user?.apiKeyPrefix ? "Rotate API Key" : "Generate API Key"}
+          </Button>
+        </div>
       </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center justify-between rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
+          <span>{error}</span>
+          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
 
       {/* API Key Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -198,7 +231,7 @@ const Home = () => {
             <DialogTitle>Your API Key</DialogTitle>
             <DialogDescription>
               Copy this API key and store it securely. You won&apos;t be able to
-              see it again.
+              see it again, and any previous key no longer works.
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center space-x-2">
@@ -381,6 +414,20 @@ const Home = () => {
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
+                          {(vm.status === "RUNNING" || vm.status === "PAUSED") && (
+                            <Button
+                              onClick={() => togglePause(vm)}
+                              variant="ghost"
+                              size="sm"
+                              disabled={togglingId === vm.id || deletingId === vm.id}
+                            >
+                              {togglingId === vm.id
+                                ? "..."
+                                : vm.status === "RUNNING"
+                                  ? "Pause"
+                                  : "Resume"}
+                            </Button>
+                          )}
                           <Button
                             onClick={() => deleteVm(vm.id)}
                             variant="ghost"

@@ -1,12 +1,6 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 import { prisma } from "@fuse/db";
-import crypto from "crypto";
-
-// Generate a secure random API key
-function generateApiKey(): string {
-  return `fc_${crypto.randomBytes(32).toString("hex")}`;
-}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   // Reads AUTH_GOOGLE_ID and AUTH_GOOGLE_SECRET from env
@@ -32,7 +26,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             name: user.name,
             image: user.image,
             emailVerified: new Date(),
-            apiKey: generateApiKey(),
+            // No API key on sign-up: the user generates one from the
+            // dashboard and sees it once (only the hash is stored).
           },
         });
         token.id = dbUser.id;
