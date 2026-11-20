@@ -6,6 +6,10 @@ export const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 const NVM_INIT = `export NVM_DIR="/root/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"`;
 
+// Long enough for `npm install`; stops a command that never closes its
+// output (e.g. it left a background process attached) from hanging forever.
+const EXEC_TIMEOUT_MS = 5 * 60_000;
+
 const execOnHost = (host: string, command: string, stdin?: string) => {
   const entry = connections.get(host);
   if (!entry?.isReady) {
@@ -18,9 +22,21 @@ const execOnHost = (host: string, command: string, stdin?: string) => {
 
       let output = "";
       let error = "";
+      const timer = setTimeout(() => {
+        stream.close();
+        reject(
+          Object.assign(
+            new Error(
+              `Command timed out after ${EXEC_TIMEOUT_MS / 1000}s. Background processes must redirect their output, e.g. \`cmd > log 2>&1 &\``,
+            ),
+            { status: 504 },
+          ),
+        );
+      }, EXEC_TIMEOUT_MS);
 
       stream
         .on("close", (code: number) => {
+          clearTimeout(timer);
           if (code === 0) resolve(output.trim());
           else reject(new Error(`Command failed (exit ${code}): ${error || output}`));
         })

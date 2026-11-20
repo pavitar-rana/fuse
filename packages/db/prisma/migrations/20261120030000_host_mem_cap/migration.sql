@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Config" ADD COLUMN     "maxHostMemMb" INTEGER NOT NULL DEFAULT 6000;
+

@@ -9,6 +9,7 @@ const FALLBACK = {
   defaultVcpu: 1,
   maxVmsPerUser: 2,
   maxRunMinutes: 60,
+  maxHostMemMb: 6000,
 };
 
 export type Limits = typeof FALLBACK;

@@ -39,6 +39,8 @@ If any step fails, everything acquired so far is torn down (port maps, process, 
 
 **Pause / resume**: pause freezes the guest, writes a full snapshot (`VM_DIR/vm-<id>.snap` + `vm-<id>.mem`, the mem file is the size of the VM's RAM), then kills Firecracker and removes the TAP, so a paused VM uses no RAM or CPU. It keeps its IP, port maps and rootfs, because the guest's network config is inside the snapshot. Resume recreates the TAP, starts a new Firecracker, loads the snapshot (`resume_vm: true`), waits for SSH and deletes the snapshot files. A failed resume leaves the snapshot in place so you can retry.
 
+**Startup reconcile**: on boot the backend fixes VMs left mid-operation: interrupted creates → `FAILED` + teardown, interrupted deletes finish, interrupted pause/resume roll back, `RUNNING` VMs whose process is gone (server reboot) → `FAILED`, and DNAT rules are re-added.
+
 **Isolation**: TAPs are isolated bridge ports (no VM↔VM traffic), and `INPUT -i br0` drops anything a guest initiates toward the host.
 
 ## Data model (`packages/db/prisma/schema.prisma`)
@@ -50,7 +52,7 @@ If any step fails, everything acquired so far is torn down (port maps, process, 
 | `IpPool` / `PortPool` | Per-host allocatable IPs and host ports (`AVAILABLE`/`ALLOCATED`) |
 | `Virtualmachine` | IP, MAC, socket, rootfs path, vCPU/mem, status, Firecracker PGID, host |
 | `PortMapping` | VM port → host port |
-| `Config` | One row (`id = 'default'`) of platform limits you can edit any time: `minMemMb`/`maxMemMb`/`defaultMemMb`, `maxVcpu`/`defaultVcpu`, `maxVmsPerUser` (paused VMs count), `maxRunMinutes` (a RUNNING VM is auto-paused after this, 0 = no limit). Read on every request, so edits apply without a restart |
+| `Config` | One row (`id = 'default'`) of platform limits you can edit any time: `minMemMb`/`maxMemMb`/`defaultMemMb`, `maxVcpu`/`defaultVcpu`, `maxVmsPerUser` (paused VMs count), `maxRunMinutes` (a RUNNING VM is auto-paused after this, 0 = no limit), `maxHostMemMb` (total RAM of live VMs per host; create/resume get 503 when full). Read on every request, so edits apply without a restart |
 
 ## Running it
 

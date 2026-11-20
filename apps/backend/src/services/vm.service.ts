@@ -8,7 +8,7 @@ import { env } from "../config/env.ts";
 import { pauseToSnapshot, resumeFromSnapshot } from "../firecracker/firecracker.snapshot.ts";
 import type { VmStatus } from "@fuse/db/client";
 import { getLimits } from "../repositories/config.repository.ts";
-import { QuotaExceededError } from "../repositories/vm.repository.ts";
+import { HostFullError, QuotaExceededError } from "../repositories/vm.repository.ts";
 
 const intInRange = (
   value: unknown,
@@ -62,9 +62,11 @@ export const createVm = async (
       vcpuCount,
       memSize,
       maxVmsPerUser: limits.maxVmsPerUser,
+      maxHostMemMb: limits.maxHostMemMb,
     });
   } catch (err) {
     if (err instanceof QuotaExceededError) throw serviceError(err.message, 403);
+    if (err instanceof HostFullError) throw serviceError(err.message, 503);
     throw err;
   }
 
@@ -124,8 +126,18 @@ export const pauseVm = async (userId: string, vmId: unknown) => {
 };
 
 export const resumeVm = async (userId: string, vmId: unknown) => {
-  const { vm, already } = await beginTransition(userId, vmId, "PAUSED", "RESUMING", "RUNNING");
-  if (already) return { message: "VM already RUNNING", data: toDto(vm) };
+  const vm = await requireVm(vmId, userId);
+  if (vm.status === "RUNNING") return { message: "VM already RUNNING", data: toDto(vm) };
+
+  const { maxHostMemMb } = await getLimits();
+  let started;
+  try {
+    started = await vmRepository.beginResume(vm, maxHostMemMb);
+  } catch (err) {
+    if (err instanceof HostFullError) throw serviceError(err.message, 503);
+    throw err;
+  }
+  if (!started) throw serviceError(`VM is ${vm.status}, expected PAUSED`, 409);
 
   try {
     await resumeFromSnapshot(vm, (pgid) => vmRepository.updateVm(vm.id, { pid: pgid }));

@@ -2,7 +2,7 @@ import { spawn } from "child_process";
 import fs from "fs";
 import { delay } from "../lib/delayHelper.ts";
 import { env } from "../config/env.ts";
-import { sudo, trySudo } from "../lib/sh.ts";
+import { run, sudo, trySudo } from "../lib/sh.ts";
 
 // Starts Firecracker in its own process group and waits for the API socket.
 // Returns the process group id. The caller stores it on the VM row so delete
@@ -51,6 +51,16 @@ export const killFirecracker = async (pgid: number | null | undefined, api_socke
   // With sudo's use_pty (default on some distros) firecracker gets its own
   // session, so the group kill above can miss it. Also covers rows with no pid.
   await trySudo("pkill", ["-KILL", "-f", "--", `--api-sock ${api_socket}$`]);
+};
+
+// Is a Firecracker process serving this API socket? (pgrep needs no sudo.)
+export const isFirecrackerAlive = async (api_socket: string) => {
+  try {
+    await run("pgrep", ["-f", "--", `--api-sock ${api_socket}$`]);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 export const removeFile = (path: string) => trySudo("rm", ["-f", path]);

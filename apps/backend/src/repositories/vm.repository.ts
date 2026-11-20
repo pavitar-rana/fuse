@@ -56,6 +56,30 @@ export const releasePortMapping = async (
 };
 
 export class QuotaExceededError extends Error {}
+export class HostFullError extends Error {}
+
+// States in which a VM has a Firecracker process holding its RAM.
+const MEM_HOLDING: VmStatus[] = ["CREATING", "RUNNING", "PAUSING", "RESUMING"];
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+// One lock per host serialises everything that takes RAM (create, resume),
+// so the capacity check and the claim happen atomically.
+const lockHost = (tx: Tx, hostId: string) =>
+  tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"fuse-host:" + hostId}))`;
+
+const assertHostCapacity = async (tx: Tx, hostId: string, memSize: number, maxHostMemMb: number) => {
+  const { _sum } = await tx.virtualmachine.aggregate({
+    where: { hostId, status: { in: MEM_HOLDING } },
+    _sum: { memSize: true },
+  });
+  const used = _sum.memSize ?? 0;
+  if (used + memSize > maxHostMemMb) {
+    throw new HostFullError(
+      `Server is at capacity (${used}/${maxHostMemMb} MiB in use). Try again later.`,
+    );
+  }
+};
 
 // Quota check + IP reservation + row insert in one transaction. The per-user
 // advisory lock serialises concurrent creates by the same user, so two
@@ -71,10 +95,11 @@ export const reserveVm = async (
     vcpuCount: number;
     memSize: number;
   },
-  maxVmsPerUser: number,
+  limits: { maxVmsPerUser: number; maxHostMemMb: number },
 ) => {
+  const { maxVmsPerUser, maxHostMemMb } = limits;
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${data.userId}))`;
+    await lockHost(tx, data.hostId);
 
     const active = await tx.virtualmachine.count({
       where: { userId: data.userId, status: { notIn: ["FAILED", "TERMINATED"] } },
@@ -84,6 +109,8 @@ export const reserveVm = async (
         `VM limit reached (${active}/${maxVmsPerUser}). Delete a VM first.`,
       );
     }
+
+    await assertHostCapacity(tx, data.hostId, data.memSize, maxHostMemMb);
 
     const [row] = await tx.$queryRaw<{ id: string; ip: string }[]>`
       SELECT id, ip FROM "IpPool"
@@ -125,6 +152,29 @@ export const transitionVm = async (id: string, from: VmStatus, to: VmStatus) => 
     data: { status: to },
   });
   return count === 1;
+};
+
+// PAUSED → RESUMING, but only if the host has room for the VM's RAM.
+export const beginResume = async (
+  vm: { id: string; hostId: string; memSize: number },
+  maxHostMemMb: number,
+) => {
+  return prisma.$transaction(async (tx) => {
+    await lockHost(tx, vm.hostId);
+    await assertHostCapacity(tx, vm.hostId, vm.memSize, maxHostMemMb);
+    const { count } = await tx.virtualmachine.updateMany({
+      where: { id: vm.id, status: "PAUSED" },
+      data: { status: "RESUMING" },
+    });
+    return count === 1;
+  });
+};
+
+export const findByStatus = async (hostId: string, statuses: VmStatus[]) => {
+  return prisma.virtualmachine.findMany({
+    where: { hostId, status: { in: statuses } },
+    include: { portMappings: true },
+  });
 };
 
 export const findVmById = async (id: string, userId: string) => {

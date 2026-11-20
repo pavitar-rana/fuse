@@ -140,5 +140,7 @@ model Config {
   maxVmsPerUser  Int      @default(2)
   // A RUNNING VM is auto-paused after this many minutes (0 = no limit)
   maxRunMinutes  Int      @default(60)
+  // Total RAM all live VMs on one host may use (paused VMs don't count)
+  maxHostMemMb   Int      @default(6000)
   updatedAt      DateTime @updatedAt
 }

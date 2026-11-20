@@ -37,6 +37,7 @@ type CreateInput = {
   sshMaxRetries?: number;
   sshBaseDelayMs?: number;
   maxVmsPerUser: number;
+  maxHostMemMb: number;
 };
 
 // State machine: row inserted as CREATING → RUNNING on success. On any
@@ -60,7 +61,7 @@ export const createFireCracker = async (input: CreateInput) => {
       vcpuCount: input.vcpuCount,
       memSize: input.memSize,
     },
-    input.maxVmsPerUser,
+    { maxVmsPerUser: input.maxVmsPerUser, maxHostMemMb: input.maxHostMemMb },
   );
   const vmIP = vm.vmIp;
 
