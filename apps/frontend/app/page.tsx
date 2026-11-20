@@ -1,502 +1,113 @@
-"use client";
-
-import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import Link from "next/link";
+import { Cpu, Lock, PauseCircle, Terminal, Zap, Globe } from "lucide-react";
+import { auth } from "@/auth";
+import { SiteHeader } from "@/components/site-header";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-  Key,
-  Server,
-  Copy,
-  Check,
-  RefreshCw,
-  Cpu,
-  MemoryStick,
-  Network,
-} from "lucide-react";
-import { getUserInfo } from "@/actions/get-user-info";
-import { rotateApiKey } from "@/actions/api-key";
-import {
-  createVm as createVmAction,
-  deleteVm as deleteVmAction,
-  pauseVm as pauseVmAction,
-  resumeVm as resumeVmAction,
-} from "@/actions/vm";
+import { getLimitsText } from "@/lib/limits";
 
-type PortMapping = {
-  id: string;
-  vmPort: number;
-  hostPort: number;
-};
+const features = [
+  {
+    icon: Lock,
+    title: "Real isolation",
+    body: "Every sandbox is a Firecracker microVM with its own kernel, rootfs and network port. Not a container.",
+  },
+  {
+    icon: Zap,
+    title: "Boots in seconds",
+    body: "Create a VM with one API call and run commands in it straight away.",
+  },
+  {
+    icon: PauseCircle,
+    title: "Pause and resume",
+    body: "Pause snapshots memory and disk to storage and frees the host. Resume picks up exactly where it stopped.",
+  },
+  {
+    icon: Terminal,
+    title: "Exec and files over HTTP",
+    body: "Run commands, write files and create directories with a simple JSON API and an API key.",
+  },
+  {
+    icon: Globe,
+    title: "Expose ports",
+    body: "Start a server inside the VM and get a public URL for it.",
+  },
+  {
+    icon: Cpu,
+    title: "Self-hosted",
+    body: "Raw Firecracker, Linux networking and TypeScript. No orchestration frameworks.",
+  },
+];
 
-type UserInfo = Awaited<ReturnType<typeof getUserInfo>>;
-type VmWithRelations = UserInfo["vms"][number];
-type DashboardUser = NonNullable<UserInfo["user"]>;
+const example = `curl -X POST https://firecracker.pavitar.dev/api/firecracker/create \\
+  -H "Authorization: Bearer $FUSE_API_KEY" \\
+  -H "Content-Type: application/json" -d '{}'
 
-const Home = () => {
-  const { data: session, status } = useSession();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [user, setUser] = useState<DashboardUser>();
-  const [error, setError] = useState<string | null>(null);
-  const [copiedVmId, setCopiedVmId] = useState<string | null>(null);
+curl -X POST https://firecracker.pavitar.dev/api/firecracker/exec/run \\
+  -H "Authorization: Bearer $FUSE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"id":"<vm id>","projectId":"demo","command":"uname -a"}'`;
 
-  const [vms, setVms] = useState<VmWithRelations[]>();
-  const [vmsLoading, setVmsLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
-
-  const fetchUserInfo = async () => {
-    if (!session?.user?.id) return;
-    setVmsLoading(true);
-    try {
-      const userInfo = await getUserInfo();
-      if (userInfo.user) setUser(userInfo.user);
-      setVms(userInfo.vms);
-    } catch {
-      setError("Failed to load your VMs");
-    } finally {
-      setVmsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (session?.user?.id) {
-      fetchUserInfo();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
-
-  const copyVmId = async (id: string) => {
-    await navigator.clipboard.writeText(id);
-    setCopiedVmId(id);
-    setTimeout(() => setCopiedVmId(null), 1500);
-  };
-
-  const generateApiKey = async () => {
-    setError(null);
-    const res = await rotateApiKey();
-    if (!res.ok) return setError(res.message);
-    setApiKey(res.key);
-    setIsDialogOpen(true);
-    await fetchUserInfo();
-  };
-
-  const copyToClipboard = async () => {
-    if (apiKey) {
-      await navigator.clipboard.writeText(apiKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "RUNNING":
-        return <Badge variant="success">Running</Badge>;
-      case "CREATING":
-        return <Badge variant="warning">Creating</Badge>;
-      case "PAUSING":
-        return <Badge variant="warning">Pausing</Badge>;
-      case "PAUSED":
-        return <Badge variant="secondary">Paused</Badge>;
-      case "RESUMING":
-        return <Badge variant="warning">Resuming</Badge>;
-      case "TERMINATING":
-        return <Badge variant="warning">Terminating</Badge>;
-      case "TERMINATED":
-        return <Badge variant="outline">Terminated</Badge>;
-      case "FAILED":
-        return <Badge variant="destructive">Failed</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
-
-  const createVm = async () => {
-    if (!session?.user?.id) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const res = await createVmAction();
-      if (!res.ok) setError(`Create failed: ${res.message}`);
-      await fetchUserInfo();
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const deleteVm = async (id: string) => {
-    if (!session?.user?.id) return;
-    setDeletingId(id);
-    setError(null);
-    try {
-      const res = await deleteVmAction(id);
-      if (!res.ok) setError(`Delete failed: ${res.message}`);
-      await fetchUserInfo();
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const togglePause = async (vm: VmWithRelations) => {
-    setTogglingId(vm.id);
-    setError(null);
-    try {
-      const pausing = vm.status === "RUNNING";
-      const res = pausing ? await pauseVmAction(vm.id) : await resumeVmAction(vm.id);
-      if (!res.ok) setError(`${pausing ? "Pause" : "Resume"} failed: ${res.message}`);
-      await fetchUserInfo();
-    } finally {
-      setTogglingId(null);
-    }
-  };
-
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    );
-  }
+export default async function LandingPage() {
+  const [session, limitsText] = await Promise.all([auth(), getLimitsText()]);
+  const signedIn = Boolean(session?.user?.id);
+  const cta = signedIn
+    ? { href: "/dashboard", label: "Go to dashboard" }
+    : { href: "/sign-in", label: "Get started free" };
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      {/* Header Section */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Firecracker Cloud Dashboard
+    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30">
+      <SiteHeader />
+
+      <main className="container mx-auto px-6">
+        <section className="mx-auto max-w-3xl py-20 text-center sm:py-28">
+          <p className="mb-4 inline-block rounded-full border px-3 py-1 text-xs text-muted-foreground">
+            {limitsText}
+          </p>
+          <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
+            Cloud sandboxes on Firecracker microVMs
           </h1>
-          {session?.user?.email && (
-            <p className="text-muted-foreground mt-1">
-              Welcome, {session.user.email}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          {user?.apiKeyPrefix && (
-            <code className="text-xs text-muted-foreground">
-              {user.apiKeyPrefix}…
-            </code>
-          )}
-          <Button onClick={generateApiKey} size="lg">
-            <Key className="mr-2 h-4 w-4" />
-            {user?.apiKeyPrefix ? "Rotate API Key" : "Generate API Key"}
-          </Button>
-        </div>
-      </div>
+          <p className="mt-6 text-lg text-muted-foreground">
+            Spin up an isolated Linux VM, run code in it over an API, pause it, and tear it
+            down when you&apos;re done.
+          </p>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+            <Button asChild size="lg">
+              <Link href={cta.href}>{cta.label}</Link>
+            </Button>
+            <Button asChild size="lg" variant="outline">
+              <a href="https://github.com/pavitar-rana/fuse" target="_blank" rel="noreferrer">
+                View on GitHub
+              </a>
+            </Button>
+          </div>
+        </section>
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-center justify-between rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-        >
-          <span>{error}</span>
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
-            Dismiss
-          </Button>
-        </div>
-      )}
-
-      {/* API Key Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Your API Key</DialogTitle>
-            <DialogDescription>
-              Copy this API key and store it securely. You won&apos;t be able to
-              see it again, and any previous key no longer works.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center space-x-2">
-            <div className="grid flex-1 gap-2">
-              <div className="flex items-center space-x-2 rounded-md border bg-muted p-3">
-                <code className="flex-1 text-sm font-mono break-all">
-                  {apiKey}
-                </code>
+        <section className="grid gap-4 pb-20 sm:grid-cols-2 lg:grid-cols-3">
+          {features.map(({ icon: Icon, title, body }) => (
+            <div key={title} className="rounded-xl border bg-card p-6">
+              <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Icon className="h-5 w-5 text-primary" />
               </div>
+              <h3 className="mb-1 font-semibold">{title}</h3>
+              <p className="text-sm text-muted-foreground">{body}</p>
             </div>
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={copyToClipboard}
-              className="w-full sm:w-auto"
-            >
-              {copied ? (
-                <>
-                  <Check className="mr-2 h-4 w-4" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy to Clipboard
-                </>
-              )}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setIsDialogOpen(false)}
-              className="w-full sm:w-auto"
-            >
-              Done
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          ))}
+        </section>
 
-      {/* VMs List Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Server className="h-5 w-5" />
-                Your Virtual Machines
-              </CardTitle>
-              <CardDescription>
-                Manage and monitor your running VMs
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={fetchUserInfo}
-                variant="ghost"
-                size="icon"
-                disabled={vmsLoading}
-                title="Refresh"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${vmsLoading ? "animate-spin" : ""}`}
-                />
-              </Button>
-              <Button onClick={createVm} variant="outline" disabled={creating}>
-                {creating ? "Creating..." : "Create New VM"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {vmsLoading && vms === undefined ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-              <RefreshCw className="h-6 w-6 animate-spin mb-3" />
-              Loading your virtual machines...
-            </div>
-          ) : vms?.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Server className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No VMs yet</h3>
-              <p className="text-muted-foreground mb-4">
-                Get started by creating your first virtual machine
-              </p>
-              <Button onClick={createVm} disabled={creating}>
-                {creating ? "Creating..." : "Create VM"}
-              </Button>
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>VM ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Network</TableHead>
-                    <TableHead>Ports</TableHead>
-                    <TableHead>Resources</TableHead>
-                    <TableHead>Host</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {vms?.map((vm) => (
-                    <TableRow key={vm.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-1.5">
-                          <code
-                            className="text-xs bg-muted px-2 py-1 rounded"
-                            title={vm.id}
-                          >
-                            {vm.id.slice(0, 10)}...
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => copyVmId(vm.id)}
-                            title="Copy VM ID"
-                          >
-                            {copiedVmId === vm.id ? (
-                              <Check className="h-3 w-3 text-green-600" />
-                            ) : (
-                              <Copy className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(vm.status)}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5 text-xs">
-                          <span className="flex items-center gap-1">
-                            <Network className="h-3 w-3 text-muted-foreground" />
-                            <code className="bg-muted px-1.5 py-0.5 rounded">
-                              {vm.vmIp}
-                            </code>
-                          </span>
-                          <span className="text-muted-foreground font-mono">
-                            {vm.vmMac}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {vm.portMappings && vm.portMappings.length > 0 ? (
-                          <div className="flex flex-col gap-0.5">
-                            {vm.portMappings.map((pm: PortMapping) => (
-                              <code
-                                key={pm.id}
-                                className="text-xs bg-muted px-1.5 py-0.5 rounded w-fit"
-                              >
-                                {pm.hostPort} → {pm.vmPort}
-                              </code>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            None
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Cpu className="h-3 w-3" /> {vm.vcpuCount} vCPU
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MemoryStick className="h-3 w-3" /> {vm.memSize} MB
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {vm.host?.hostname ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {vm.createdAt instanceof Date
-                          ? vm.createdAt.toISOString().slice(0, 10)
-                          : String(vm.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          {(vm.status === "RUNNING" || vm.status === "PAUSED") && (
-                            <Button
-                              onClick={() => togglePause(vm)}
-                              variant="ghost"
-                              size="sm"
-                              disabled={togglingId === vm.id || deletingId === vm.id}
-                            >
-                              {togglingId === vm.id
-                                ? "..."
-                                : vm.status === "RUNNING"
-                                  ? "Pause"
-                                  : "Resume"}
-                            </Button>
-                          )}
-                          <Button
-                            onClick={() => deleteVm(vm.id)}
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive"
-                            disabled={deletingId === vm.id}
-                          >
-                            {deletingId === vm.id ? "Deleting..." : "Delete"}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        <section className="mx-auto max-w-3xl pb-24">
+          <h2 className="mb-4 text-center text-2xl font-semibold">Two calls to a running sandbox</h2>
+          <pre className="overflow-x-auto rounded-xl border bg-muted/60 p-5 text-xs leading-relaxed sm:text-sm">
+            <code>{example}</code>
+          </pre>
+          <p className="mt-3 text-center text-sm text-muted-foreground">
+            Get your API key from the dashboard after signing in.
+          </p>
+        </section>
+      </main>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total VMs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{vms?.length ?? 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {vms?.filter((vm) => vm.status === "RUNNING").length ?? 0} running
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total vCPUs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {vms?.reduce(
-                (sum, vm) =>
-                  sum + (typeof vm?.vcpuCount === "number" ? vm.vcpuCount : 0),
-                0,
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Across all VMs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total Memory</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {vms?.reduce(
-                (sum, vm) =>
-                  sum + (typeof vm.memSize === "number" ? vm.memSize : 0),
-                0,
-              )}{" "}
-              MB
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Allocated memory
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <footer className="border-t py-6 text-center text-xs text-muted-foreground">
+        Fuse · self-hosted Firecracker sandboxes
+      </footer>
     </div>
   );
-};
-
-export default Home;
+}
