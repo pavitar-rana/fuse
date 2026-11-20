@@ -7,11 +7,8 @@ import { getCurrentHost } from "../config/host.ts";
 import { env } from "../config/env.ts";
 import { pauseToSnapshot, resumeFromSnapshot } from "../firecracker/firecracker.snapshot.ts";
 import type { VmStatus } from "@fuse/db/client";
-
-const LIMITS = {
-  vcpu: { min: 1, max: 2, default: 1 },
-  memMb: { min: 128, max: 3072, default: 512 },
-};
+import { getLimits } from "../repositories/config.repository.ts";
+import { QuotaExceededError } from "../repositories/vm.repository.ts";
 
 const intInRange = (
   value: unknown,
@@ -46,10 +43,30 @@ export const createVm = async (
   userId: string,
   config: { memSize?: unknown; vcpuCount?: unknown } = {},
 ) => {
-  const vcpuCount = intInRange(config.vcpuCount, "vcpuCount", LIMITS.vcpu);
-  const memSize = intInRange(config.memSize, "memSize", LIMITS.memMb);
+  const limits = await getLimits();
+  const vcpuCount = intInRange(config.vcpuCount, "vcpuCount", {
+    min: 1,
+    max: limits.maxVcpu,
+    default: Math.min(limits.defaultVcpu, limits.maxVcpu),
+  });
+  const memSize = intInRange(config.memSize, "memSize", {
+    min: limits.minMemMb,
+    max: limits.maxMemMb,
+    default: Math.min(limits.defaultMemMb, limits.maxMemMb),
+  });
 
-  const vm = await createFireCracker({ userId, vcpuCount, memSize });
+  let vm;
+  try {
+    vm = await createFireCracker({
+      userId,
+      vcpuCount,
+      memSize,
+      maxVmsPerUser: limits.maxVmsPerUser,
+    });
+  } catch (err) {
+    if (err instanceof QuotaExceededError) throw serviceError(err.message, 403);
+    throw err;
+  }
 
   return { message: "VM created", data: toDto(vm) };
 };
@@ -98,7 +115,11 @@ export const pauseVm = async (userId: string, vmId: unknown) => {
     throw err;
   }
 
-  const paused = await vmRepository.updateVm(vm.id, { status: "PAUSED", pid: null });
+  const paused = await vmRepository.updateVm(vm.id, {
+    status: "PAUSED",
+    pid: null,
+    startedAt: null,
+  });
   return { message: "VM paused", data: toDto(paused) };
 };
 
@@ -113,7 +134,10 @@ export const resumeVm = async (userId: string, vmId: unknown) => {
     throw err;
   }
 
-  const running = await vmRepository.updateVm(vm.id, { status: "RUNNING" });
+  const running = await vmRepository.updateVm(vm.id, {
+    status: "RUNNING",
+    startedAt: new Date(),
+  });
   return { message: "VM resumed", data: toDto(running) };
 };
 

@@ -3,6 +3,7 @@ import cors from "cors";
 import { execRoute, vmRoute } from "./routes/index.ts";
 import { requireAuth } from "./middleware/auth.ts";
 import { errorHandler } from "./middleware/error.ts";
+import { startReaper } from "./services/reaper.ts";
 
 const app = express();
 
@@ -21,4 +22,5 @@ app.use(errorHandler);
 
 app.listen(4000, "127.0.0.1", () => {
   console.log("Server running on port : 4000");
+  startReaper();
 });

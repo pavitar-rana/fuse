@@ -36,6 +36,7 @@ type CreateInput = {
   vcpuCount: number;
   sshMaxRetries?: number;
   sshBaseDelayMs?: number;
+  maxVmsPerUser: number;
 };
 
 // State machine: row inserted as CREATING → RUNNING on success. On any
@@ -48,25 +49,20 @@ export const createFireCracker = async (input: CreateInput) => {
   const tap = tapName(vmId);
   const mac = macFromCuid(vmId);
 
-  const vmIP = await vmRepository.allocateVmIP(vmId, host.id);
-
-  let vm;
-  try {
-    vm = await vmRepository.insertVm({
+  const vm = await vmRepository.reserveVm(
+    {
       id: vmId,
       userId: input.userId,
       hostId: host.id,
-      vmIp: vmIP,
       vmMac: mac,
       socket: api_socket,
       rootfsPath: vmRootfs,
       vcpuCount: input.vcpuCount,
       memSize: input.memSize,
-    });
-  } catch (err) {
-    await vmRepository.releaseVmIP(vmId);
-    throw err;
-  }
+    },
+    input.maxVmsPerUser,
+  );
+  const vmIP = vm.vmIp;
 
   let pid: number | null = null;
   try {
@@ -104,7 +100,7 @@ export const createFireCracker = async (input: CreateInput) => {
     });
     await configureGuestDns(vmIP, ipConfig.nameservers);
 
-    return await vmRepository.updateVm(vmId, { status: "RUNNING" });
+    return await vmRepository.updateVm(vmId, { status: "RUNNING", startedAt: new Date() });
   } catch (err) {
     console.error(`Create ${vmId} failed, rolling back:`, err);
     try {

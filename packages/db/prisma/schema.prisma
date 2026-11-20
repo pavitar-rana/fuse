@@ -60,6 +60,9 @@ model Virtualmachine {
   memSize    Int
   status     VmStatus @default(CREATING)
   pid        Int?
+  // When the VM last started running (create or resume). Used for the
+  // Config.maxRunMinutes limit.
+  startedAt  DateTime?
   hostId     String
   host       Host     @relation(fields: [hostId], references: [id])
 
@@ -120,4 +123,22 @@ model PortPool {
 
   @@unique([hostId, hostPort])
   @@index([hostId, status])
+}
+
+// Platform limits. One row (id = "default"), editable any time from the DB
+// (e.g. the Supabase table editor). The backend reads it on every request,
+// so changes apply immediately without a restart.
+model Config {
+  id             String   @id @default("default")
+  // Per-VM resources
+  minMemMb       Int      @default(128)
+  maxMemMb       Int      @default(3072)
+  defaultMemMb   Int      @default(512)
+  maxVcpu        Int      @default(2)
+  defaultVcpu    Int      @default(1)
+  // VMs a user may hold at once (anything not FAILED/TERMINATED, paused included)
+  maxVmsPerUser  Int      @default(2)
+  // A RUNNING VM is auto-paused after this many minutes (0 = no limit)
+  maxRunMinutes  Int      @default(60)
+  updatedAt      DateTime @updatedAt
 }

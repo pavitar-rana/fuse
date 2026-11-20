@@ -31,7 +31,8 @@ const callBackend = async (path: string, body: unknown): Promise<Result> => {
   }
 };
 
-export const createVm = async (config: { memSize: number; vcpuCount: number }) =>
+// Omitted fields fall back to the defaults in the Config table.
+export const createVm = async (config: { memSize?: number; vcpuCount?: number } = {}) =>
   callBackend("/firecracker/create", { config });
 
 export const deleteVm = async (id: string) => callBackend("/firecracker/delete", { id });

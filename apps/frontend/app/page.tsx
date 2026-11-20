@@ -143,7 +143,7 @@ const Home = () => {
     setCreating(true);
     setError(null);
     try {
-      const res = await createVmAction({ memSize: 512, vcpuCount: 1 });
+      const res = await createVmAction();
       if (!res.ok) setError(`Create failed: ${res.message}`);
       await fetchUserInfo();
     } finally {

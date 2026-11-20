@@ -50,6 +50,7 @@ If any step fails, everything acquired so far is torn down (port maps, process, 
 | `IpPool` / `PortPool` | Per-host allocatable IPs and host ports (`AVAILABLE`/`ALLOCATED`) |
 | `Virtualmachine` | IP, MAC, socket, rootfs path, vCPU/mem, status, Firecracker PGID, host |
 | `PortMapping` | VM port → host port |
+| `Config` | One row (`id = 'default'`) of platform limits you can edit any time: `minMemMb`/`maxMemMb`/`defaultMemMb`, `maxVcpu`/`defaultVcpu`, `maxVmsPerUser` (paused VMs count), `maxRunMinutes` (a RUNNING VM is auto-paused after this, 0 = no limit). Read on every request, so edits apply without a restart |
 
 ## Running it
 
@@ -79,7 +80,7 @@ Every `/firecracker/*` route needs `Authorization: Bearer fc_...` (generate a ke
 
 | Route | Body | Notes |
 |---|---|---|
-| `/firecracker/create` | `config{memSize?, vcpuCount?}` | 128–3072 MiB (default 512), 1–2 vCPU (default 1) → 201 |
+| `/firecracker/create` | `config{memSize?, vcpuCount?}` | limits and defaults come from the `Config` table; 403 when over `maxVmsPerUser` → 201 |
 | `/firecracker/delete` | `id` | works in any state |
 | `/firecracker/pause` | `id` | `RUNNING` → `PAUSING` → `PAUSED`: snapshot to disk, process stopped |
 | `/firecracker/resume` | `id` | `PAUSED` → `RESUMING` → `RUNNING`: restored from the snapshot |
