@@ -38,7 +38,14 @@ const execOnHost = (host: string, command: string, stdin?: string) => {
         .on("close", (code: number) => {
           clearTimeout(timer);
           if (code === 0) resolve(output.trim());
-          else reject(new Error(`Command failed (exit ${code}): ${error || output}`));
+          // The user's command failing is a normal outcome, not a server
+          // error: 422 with its output so the caller can see what went wrong.
+          else
+            reject(
+              Object.assign(new Error(`Command failed (exit ${code}): ${error || output}`), {
+                status: 422,
+              }),
+            );
         })
         .on("data", (data: Buffer) => (output += data.toString()))
         .stderr.on("data", (data: Buffer) => (error += data.toString()));
@@ -51,9 +58,11 @@ const execOnHost = (host: string, command: string, stdin?: string) => {
 // `command` is user-supplied shell on purpose (it's their sandbox); only the
 // path we wrap it with is quoted.
 export const runCommandfn = async (command: string, host: string, path?: string) => {
-  const finalCommand = path
-    ? `${NVM_INIT} && mkdir -p ${shellQuote(path)} && cd ${shellQuote(path)} && ${command}`
-    : `${NVM_INIT} && ${command}`;
+  // Separate lines, not `a && b && command`: otherwise a trailing `&` in the
+  // user's command backgrounds the whole chain, which keeps the SSH channel
+  // open and hangs the request. Also: a missing nvm no longer skips the command.
+  const setup = path ? `mkdir -p ${shellQuote(path)} && cd ${shellQuote(path)} || exit 1\n` : "";
+  const finalCommand = `${NVM_INIT}\n${setup}${command}`;
   return execOnHost(host, finalCommand);
 };
 
