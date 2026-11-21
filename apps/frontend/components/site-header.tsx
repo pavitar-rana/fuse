@@ -1,47 +1,73 @@
 import Link from "next/link";
-import { Flame, LogOut } from "lucide-react";
 import { auth, signOut } from "@/auth";
 import { Button } from "@/components/ui/button";
+import { Wordmark } from "@/components/brand";
+
+const GITHUB_URL = "https://github.com/pavitar-rana/fuse";
+
+const navLink =
+  "font-mono text-[0.72rem] uppercase tracking-[0.06em] text-muted-foreground transition-colors hover:text-foreground";
 
 export const SiteHeader = async () => {
   const session = await auth();
-  const email = session?.user?.email;
+  const user = session?.user;
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-      <div className="container mx-auto flex h-14 items-center justify-between px-6">
-        <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Flame className="h-4 w-4" />
-          </span>
-          Fuse
-        </Link>
+    <header className="sticky top-0 z-40 border-b bg-background/85 backdrop-blur-md">
+      <div className="frame flex h-14 items-center justify-between px-5 sm:px-8">
+        <div className="flex items-center gap-8">
+          <Link href="/" aria-label="Fuse home">
+            <Wordmark />
+          </Link>
+          <nav className="hidden items-center gap-6 md:flex">
+            <Link href="/#platform" className={navLink}>
+              Platform
+            </Link>
+            <Link href="/#api" className={navLink}>
+              API
+            </Link>
+            <Link href="/#internals" className={navLink}>
+              Internals
+            </Link>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer" className={navLink}>
+              GitHub
+            </a>
+          </nav>
+        </div>
 
-        <nav className="flex items-center gap-2">
-          {email ? (
+        <div className="flex items-center gap-2">
+          {user?.email ? (
             <>
-              <span className="hidden text-sm text-muted-foreground sm:inline">{email}</span>
-              <Button asChild variant="ghost" size="sm">
-                <Link href="/dashboard">Dashboard</Link>
-              </Button>
+              <span className="hidden font-mono text-[0.72rem] text-dim lg:inline">
+                {user.email}
+              </span>
               <form
                 action={async () => {
                   "use server";
                   await signOut({ redirectTo: "/" });
                 }}
               >
-                <Button type="submit" variant="outline" size="sm">
-                  <LogOut className="mr-1.5 h-4 w-4" />
+                <Button type="submit" variant="ghost" size="sm">
                   Sign out
                 </Button>
               </form>
+              <Button asChild size="sm" variant="light">
+                <Link href="/dashboard">Dashboard</Link>
+              </Button>
             </>
           ) : (
-            <Button asChild size="sm">
-              <Link href="/sign-in">Sign in</Link>
-            </Button>
+            <>
+              <Button asChild size="sm" variant="ghost" className="hidden sm:inline-flex">
+                <a href={GITHUB_URL} target="_blank" rel="noreferrer">
+                  Star on GitHub
+                </a>
+              </Button>
+              <Button asChild size="sm" variant="light">
+                <Link href="/sign-in">Sign in</Link>
+              </Button>
+            </>
           )}
-        </nav>
+        </div>
       </div>
     </header>
   );

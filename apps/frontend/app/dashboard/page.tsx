@@ -1,42 +1,28 @@
 "use client";
 
-import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+  Check,
+  Copy,
+  KeyRound,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-  Key,
-  Server,
-  Copy,
-  Check,
-  RefreshCw,
-  Cpu,
-  MemoryStick,
-  Network,
-} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Bracket } from "@/components/brand";
 import { getUserInfo } from "@/actions/get-user-info";
 import { rotateApiKey } from "@/actions/api-key";
 import {
@@ -46,164 +32,229 @@ import {
   resumeVm as resumeVmAction,
 } from "@/actions/vm";
 
-type PortMapping = {
-  id: string;
-  vmPort: number;
-  hostPort: number;
+type UserInfo = Awaited<ReturnType<typeof getUserInfo>>;
+type Vm = UserInfo["vms"][number];
+type DashboardUser = NonNullable<UserInfo["user"]>;
+type Limits = UserInfo["limits"];
+
+const API_BASE = "https://firecracker.pavitar.dev/api";
+const POLL_MS = 2500;
+
+// Statuses that will change on their own; the list polls while any are present.
+const TRANSITIONAL = new Set(["CREATING", "PAUSING", "RESUMING", "TERMINATING"]);
+// Statuses that count against the per-user quota.
+const HOLDS_SLOT = (s: string) => s !== "FAILED" && s !== "TERMINATED";
+// Statuses that hold host RAM.
+const USES_RAM = (s: string) => HOLDS_SLOT(s) && s !== "PAUSED";
+
+const STATUS: Record<string, { label: string; tone: "ok" | "idle" | "busy" | "bad" | "off" }> = {
+  CREATING: { label: "Booting", tone: "busy" },
+  RUNNING: { label: "Running", tone: "ok" },
+  PAUSING: { label: "Pausing", tone: "busy" },
+  PAUSED: { label: "Paused", tone: "idle" },
+  RESUMING: { label: "Resuming", tone: "busy" },
+  TERMINATING: { label: "Deleting", tone: "busy" },
+  TERMINATED: { label: "Deleted", tone: "off" },
+  FAILED: { label: "Failed", tone: "bad" },
 };
 
-type UserInfo = Awaited<ReturnType<typeof getUserInfo>>;
-type VmWithRelations = UserInfo["vms"][number];
-type DashboardUser = NonNullable<UserInfo["user"]>;
+const TONE = {
+  ok: "text-ok",
+  idle: "text-idle",
+  busy: "text-busy",
+  bad: "text-bad",
+  off: "text-dim",
+} as const;
 
-const Home = () => {
-  const { data: session, status } = useSession();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [user, setUser] = useState<DashboardUser>();
+const DOT = {
+  ok: "bg-ok",
+  idle: "bg-idle",
+  busy: "bg-busy",
+  bad: "bg-bad",
+  off: "bg-dim",
+} as const;
+
+const relativeTime = (d: Date | string) => {
+  const then = new Date(d).getTime();
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const days = Math.round(h / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+};
+
+const useCopy = () => {
+  const [copied, setCopied] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copy = async (key: string, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setCopied(key);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(null), 1600);
+  };
+  return { copied, copy };
+};
+
+export default function DashboardPage() {
+  const [user, setUser] = useState<DashboardUser | null>(null);
+  const [limits, setLimits] = useState<Limits>(null);
+  const [vms, setVms] = useState<Vm[] | undefined>();
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copiedVmId, setCopiedVmId] = useState<string | null>(null);
 
-  const [vms, setVms] = useState<VmWithRelations[]>();
-  const [vmsLoading, setVmsLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Vm | null>(null);
 
-  const fetchUserInfo = async () => {
-    if (!session?.user?.id) return;
-    setVmsLoading(true);
+  const [confirmRotate, setConfirmRotate] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [newKey, setNewKey] = useState<string | null>(null);
+
+  const { copied, copy } = useCopy();
+
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
+    if (!opts.silent) setRefreshing(true);
     try {
-      const userInfo = await getUserInfo();
-      if (userInfo.user) setUser(userInfo.user);
-      setVms(userInfo.vms);
+      const info = await getUserInfo();
+      setUser(info.user);
+      setLimits(info.limits);
+      setVms(info.vms);
     } catch {
-      setError("Failed to load your VMs");
+      setError("Couldn't load your sandboxes. Check that the database is reachable, then refresh.");
     } finally {
-      setVmsLoading(false);
+      if (!opts.silent) setRefreshing(false);
     }
-  };
+  }, []);
 
+  // Initial load: the skeleton covers it, so no refresh spinner.
   useEffect(() => {
-    if (session?.user?.id) {
-      fetchUserInfo();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+    let alive = true;
+    getUserInfo()
+      .then((info) => {
+        if (!alive) return;
+        setUser(info.user);
+        setLimits(info.limits);
+        setVms(info.vms);
+      })
+      .catch(() => alive && setError("Couldn't load your sandboxes. Check that the database is reachable, then refresh."));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  const copyVmId = async (id: string) => {
-    await navigator.clipboard.writeText(id);
-    setCopiedVmId(id);
-    setTimeout(() => setCopiedVmId(null), 1500);
-  };
+  // Poll quietly while anything is mid-transition (including our own create).
+  const settling = creating || Boolean(vms?.some((v) => TRANSITIONAL.has(v.status)));
+  useEffect(() => {
+    if (!settling) return;
+    const t = setInterval(() => void load({ silent: true }), POLL_MS);
+    return () => clearInterval(t);
+  }, [settling, load]);
 
-  const generateApiKey = async () => {
-    setError(null);
-    const res = await rotateApiKey();
-    if (!res.ok) return setError(res.message);
-    setApiKey(res.key);
-    setIsDialogOpen(true);
-    await fetchUserInfo();
-  };
+  const usage = useMemo(() => {
+    const list = vms ?? [];
+    const held = list.filter((v) => HOLDS_SLOT(v.status));
+    const live = list.filter((v) => USES_RAM(v.status));
+    return {
+      slots: held.length,
+      running: list.filter((v) => v.status === "RUNNING").length,
+      vcpu: live.reduce((n, v) => n + (v.vcpuCount ?? 0), 0),
+      mem: live.reduce((n, v) => n + (v.memSize ?? 0), 0),
+    };
+  }, [vms]);
 
-  const copyToClipboard = async () => {
-    if (apiKey) {
-      await navigator.clipboard.writeText(apiKey);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "RUNNING":
-        return <Badge variant="success">Running</Badge>;
-      case "CREATING":
-        return <Badge variant="warning">Creating</Badge>;
-      case "PAUSING":
-        return <Badge variant="warning">Pausing</Badge>;
-      case "PAUSED":
-        return <Badge variant="secondary">Paused</Badge>;
-      case "RESUMING":
-        return <Badge variant="warning">Resuming</Badge>;
-      case "TERMINATING":
-        return <Badge variant="warning">Terminating</Badge>;
-      case "TERMINATED":
-        return <Badge variant="outline">Terminated</Badge>;
-      case "FAILED":
-        return <Badge variant="destructive">Failed</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
-    }
-  };
+  const maxSlots = limits?.maxVmsPerUser ?? null;
+  const atQuota = maxSlots !== null && usage.slots >= maxSlots;
+  const firstRunning = vms?.find((v) => v.status === "RUNNING");
 
   const createVm = async () => {
-    if (!session?.user?.id) return;
     setCreating(true);
     setError(null);
     try {
       const res = await createVmAction();
-      if (!res.ok) setError(`Create failed: ${res.message}`);
-      await fetchUserInfo();
+      if (!res.ok) setError(`Couldn't create a sandbox: ${res.message}`);
     } finally {
+      await load({ silent: true });
       setCreating(false);
     }
   };
 
-  const deleteVm = async (id: string) => {
-    if (!session?.user?.id) return;
-    setDeletingId(id);
+  const togglePause = async (vm: Vm) => {
+    const pausing = vm.status === "RUNNING";
+    setBusyId(vm.id);
     setError(null);
     try {
-      const res = await deleteVmAction(id);
-      if (!res.ok) setError(`Delete failed: ${res.message}`);
-      await fetchUserInfo();
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  const togglePause = async (vm: VmWithRelations) => {
-    setTogglingId(vm.id);
-    setError(null);
-    try {
-      const pausing = vm.status === "RUNNING";
       const res = pausing ? await pauseVmAction(vm.id) : await resumeVmAction(vm.id);
-      if (!res.ok) setError(`${pausing ? "Pause" : "Resume"} failed: ${res.message}`);
-      await fetchUserInfo();
+      if (!res.ok) setError(`Couldn't ${pausing ? "pause" : "resume"} ${vm.id}: ${res.message}`);
     } finally {
-      setTogglingId(null);
+      await load({ silent: true });
+      setBusyId(null);
     }
   };
 
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
-      </div>
-    );
-  }
+  const deleteVm = async (vm: Vm) => {
+    setConfirmDelete(null);
+    setBusyId(vm.id);
+    setError(null);
+    try {
+      const res = await deleteVmAction(vm.id);
+      if (!res.ok) setError(`Couldn't delete ${vm.id}: ${res.message}`);
+    } finally {
+      await load({ silent: true });
+      setBusyId(null);
+    }
+  };
+
+  const rotate = async () => {
+    setRotating(true);
+    setError(null);
+    try {
+      const res = await rotateApiKey();
+      if (!res.ok) return setError(`Couldn't generate a key: ${res.message}`);
+      setConfirmRotate(false);
+      setNewKey(res.key);
+      await load({ silent: true });
+    } finally {
+      setRotating(false);
+    }
+  };
+
+  const showPlaceholder = creating && !vms?.some((v) => v.status === "CREATING");
+
+  const memLabel =
+    usage.mem >= 1024 ? `${(usage.mem / 1024).toFixed(1).replace(/\.0$/, "")} GB` : `${usage.mem} MB`;
 
   return (
-    <div className="container mx-auto p-6 space-y-8">
-      {/* Header Section */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <main className="frame min-h-[calc(100vh-3.5rem)]">
+      {/* Title row */}
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-5 border-b px-5 pb-8 pt-12 sm:px-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">
-            Your sandboxes. Running VMs auto-pause after the run-time limit; resume any time.
+          <Bracket>Console</Bracket>
+          <h1 className="mt-4 text-[2.4rem] font-medium leading-none tracking-[-0.035em]">
+            Sandboxes
+          </h1>
+          <p className="mt-3 text-[0.95rem] text-muted-foreground">
+            {limits?.maxRunMinutes
+              ? `Running sandboxes pause themselves after ${limits.maxRunMinutes} minutes. Resume any time.`
+              : "Boot, pause and delete your microVMs."}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {user?.apiKeyPrefix && (
-            <code className="text-xs text-muted-foreground">
-              {user.apiKeyPrefix}…
-            </code>
-          )}
-          <Button onClick={generateApiKey} size="lg">
-            <Key className="mr-2 h-4 w-4" />
-            {user?.apiKeyPrefix ? "Rotate API Key" : "Generate API Key"}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => void load()}
+            disabled={refreshing}
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <RefreshCw className={cn(refreshing && "animate-spin")} />
+          </Button>
+          <Button onClick={createVm} disabled={creating || atQuota}>
+            <Plus />
+            {creating ? "Booting…" : "New sandbox"}
           </Button>
         </div>
       </div>
@@ -211,288 +262,414 @@ const Home = () => {
       {error && (
         <div
           role="alert"
-          className="flex items-center justify-between rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          className="flex items-start justify-between gap-4 border-b border-l-2 border-l-bad bg-bad/[0.06] px-5 py-3 font-mono text-[0.78rem] text-bad sm:px-8"
         >
-          <span>{error}</span>
-          <Button variant="ghost" size="sm" onClick={() => setError(null)}>
-            Dismiss
-          </Button>
+          <span className="leading-relaxed">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            aria-label="Dismiss"
+            className="mt-0.5 shrink-0 opacity-70 hover:opacity-100"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
-      {/* API Key Dialog */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      {/* Usage + key strip */}
+      <div className="grid border-b sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr_1.7fr]">
+        <div className="border-b px-5 py-5 sm:px-8 lg:border-b-0">
+          <div className="flex items-baseline justify-between">
+            <span className="label-mono">Slots</span>
+            <span className="font-mono text-[0.8rem] tabular-nums">
+              {usage.slots}
+              {maxSlots !== null && <span className="text-dim"> / {maxSlots}</span>}
+            </span>
+          </div>
+          {maxSlots !== null && maxSlots > 0 && (
+            <div className="mt-3 flex gap-[3px]" aria-hidden="true">
+              {Array.from({ length: maxSlots }, (_, i) => (
+                <span key={i} className={cn("h-2 flex-1", i < usage.slots ? "bg-ember" : "bg-muted")} />
+              ))}
+            </div>
+          )}
+          {atQuota && (
+            <p className="mt-2.5 text-xs leading-relaxed text-dim">
+              All slots used. Delete one to free a slot; paused sandboxes still hold theirs.
+            </p>
+          )}
+        </div>
+        <Stat label="Running" value={usage.running} className="border-b sm:border-l lg:border-b-0" />
+        <Stat label="Live vCPU" value={usage.vcpu} className="border-b lg:border-b-0 lg:border-l" />
+        <Stat label="Live RAM" value={memLabel} className="border-b sm:border-l lg:border-b-0" />
+
+        <div className="flex items-center justify-between gap-4 px-5 py-5 sm:col-span-2 sm:px-8 lg:col-span-1 lg:border-l">
+          <div className="min-w-0">
+            <span className="label-mono flex items-center gap-1.5">
+              <KeyRound className="h-3 w-3" aria-hidden="true" /> API key
+            </span>
+            {vms === undefined ? (
+              <div className="mt-3 h-5 w-36 animate-pulse bg-muted" />
+            ) : user?.apiKeyPrefix ? (
+              <p className="mt-2.5 truncate font-mono text-[0.9rem]" title="Only the start of the key is stored">
+                {user.apiKeyPrefix}
+                <span className="text-dim">••••••••••</span>
+              </p>
+            ) : (
+              <p className="mt-2.5 text-sm text-muted-foreground">None yet</p>
+            )}
+          </div>
+          {user?.apiKeyPrefix ? (
+            <Button variant="outline" size="sm" onClick={() => setConfirmRotate(true)}>
+              Rotate
+            </Button>
+          ) : (
+            <Button variant="light" size="sm" onClick={rotate} disabled={rotating || vms === undefined}>
+              {rotating ? "Generating…" : "Generate"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Sandbox table */}
+      <section aria-label="Your sandboxes" className="border-b">
+        <div
+          className={cn(
+            "label-mono hidden grid-cols-[minmax(0,1fr)_8rem_minmax(0,0.8fr)_9rem_10rem] gap-4 border-b bg-[#0c0c0c] px-8 py-3",
+            (vms === undefined || vms.length > 0 || showPlaceholder) && "md:grid",
+          )}
+        >
+          <span>Sandbox</span>
+          <span>Status</span>
+          <span>Address</span>
+          <span title="Public host port → port inside the sandbox">Host → guest</span>
+          <span className="text-right">Actions</span>
+        </div>
+
+        {vms === undefined ? (
+          <ListSkeleton />
+        ) : vms.length === 0 && !showPlaceholder ? (
+          <EmptyState onCreate={createVm} creating={creating} disabled={atQuota} />
+        ) : (
+          <ul className="divide-y">
+            {showPlaceholder && <PlaceholderRow />}
+            {vms.map((vm) => (
+              <VmRow
+                key={vm.id}
+                vm={vm}
+                busy={busyId === vm.id}
+                copied={copied === vm.id}
+                onCopy={() => copy(vm.id, vm.id)}
+                onToggle={() => togglePause(vm)}
+                onDelete={() => setConfirmDelete(vm)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <TryIt
+        vmId={firstRunning?.id}
+        copied={copied === "snippet"}
+        onCopy={(text) => copy("snippet", text)}
+      />
+
+      {/* Delete confirmation */}
+      <Dialog open={confirmDelete !== null} onOpenChange={(o) => !o && setConfirmDelete(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Your API Key</DialogTitle>
+            <DialogTitle>Delete this sandbox?</DialogTitle>
             <DialogDescription>
-              Copy this API key and store it securely. You won&apos;t be able to
-              see it again, and any previous key no longer works.
+              <span className="font-mono text-foreground">{confirmDelete?.id}</span> will be
+              stopped and its disk, snapshot and ports released. Files inside it can&apos;t be
+              recovered.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center space-x-2">
-            <div className="grid flex-1 gap-2">
-              <div className="flex items-center space-x-2 rounded-md border bg-muted p-3">
-                <code className="flex-1 text-sm font-mono break-all">
-                  {apiKey}
-                </code>
-              </div>
-            </div>
-          </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={copyToClipboard}
-              className="w-full sm:w-auto"
-            >
-              {copied ? (
-                <>
-                  <Check className="mr-2 h-4 w-4" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy to Clipboard
-                </>
-              )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDelete(null)}>
+              Keep it
             </Button>
-            <Button
-              type="button"
-              onClick={() => setIsDialogOpen(false)}
-              className="w-full sm:w-auto"
-            >
-              Done
+            <Button variant="destructive" onClick={() => confirmDelete && deleteVm(confirmDelete)}>
+              Delete sandbox
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* VMs List Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Server className="h-5 w-5" />
-                Your Virtual Machines
-              </CardTitle>
-              <CardDescription>
-                Manage and monitor your running VMs
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={fetchUserInfo}
-                variant="ghost"
-                size="icon"
-                disabled={vmsLoading}
-                title="Refresh"
-              >
-                <RefreshCw
-                  className={`h-4 w-4 ${vmsLoading ? "animate-spin" : ""}`}
-                />
-              </Button>
-              <Button onClick={createVm} variant="outline" disabled={creating}>
-                {creating ? "Creating..." : "Create New VM"}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {vmsLoading && vms === undefined ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-              <RefreshCw className="h-6 w-6 animate-spin mb-3" />
-              Loading your virtual machines...
-            </div>
-          ) : vms?.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Server className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No VMs yet</h3>
-              <p className="text-muted-foreground mb-4">
-                Get started by creating your first virtual machine
-              </p>
-              <Button onClick={createVm} disabled={creating}>
-                {creating ? "Creating..." : "Create VM"}
-              </Button>
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>VM ID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Network</TableHead>
-                    <TableHead>Ports</TableHead>
-                    <TableHead>Resources</TableHead>
-                    <TableHead>Host</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {vms?.map((vm) => (
-                    <TableRow key={vm.id}>
-                      <TableCell className="font-medium">
-                        <div className="flex items-center gap-1.5">
-                          <code
-                            className="text-xs bg-muted px-2 py-1 rounded"
-                            title={vm.id}
-                          >
-                            {vm.id.slice(0, 10)}...
-                          </code>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={() => copyVmId(vm.id)}
-                            title="Copy VM ID"
-                          >
-                            {copiedVmId === vm.id ? (
-                              <Check className="h-3 w-3 text-green-600" />
-                            ) : (
-                              <Copy className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>{getStatusBadge(vm.status)}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5 text-xs">
-                          <span className="flex items-center gap-1">
-                            <Network className="h-3 w-3 text-muted-foreground" />
-                            <code className="bg-muted px-1.5 py-0.5 rounded">
-                              {vm.vmIp}
-                            </code>
-                          </span>
-                          <span className="text-muted-foreground font-mono">
-                            {vm.vmMac}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {vm.portMappings && vm.portMappings.length > 0 ? (
-                          <div className="flex flex-col gap-0.5">
-                            {vm.portMappings.map((pm: PortMapping) => (
-                              <code
-                                key={pm.id}
-                                className="text-xs bg-muted px-1.5 py-0.5 rounded w-fit"
-                              >
-                                {pm.hostPort} → {pm.vmPort}
-                              </code>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">
-                            None
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Cpu className="h-3 w-3" /> {vm.vcpuCount} vCPU
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <MemoryStick className="h-3 w-3" /> {vm.memSize} MB
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {vm.host?.hostname ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-xs">
-                        {vm.createdAt instanceof Date
-                          ? vm.createdAt.toISOString().slice(0, 10)
-                          : String(vm.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          {(vm.status === "RUNNING" || vm.status === "PAUSED") && (
-                            <Button
-                              onClick={() => togglePause(vm)}
-                              variant="ghost"
-                              size="sm"
-                              disabled={togglingId === vm.id || deletingId === vm.id}
-                            >
-                              {togglingId === vm.id
-                                ? "..."
-                                : vm.status === "RUNNING"
-                                  ? "Pause"
-                                  : "Resume"}
-                            </Button>
-                          )}
-                          <Button
-                            onClick={() => deleteVm(vm.id)}
-                            variant="ghost"
-                            size="sm"
-                            className="text-destructive"
-                            disabled={deletingId === vm.id}
-                          >
-                            {deletingId === vm.id ? "Deleting..." : "Delete"}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Rotate confirmation */}
+      <Dialog open={confirmRotate} onOpenChange={setConfirmRotate}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rotate your API key?</DialogTitle>
+            <DialogDescription>
+              Your current key stops working immediately. Anything using it will get 401s until
+              you switch it to the new key.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRotate(false)}>
+              Cancel
+            </Button>
+            <Button onClick={rotate} disabled={rotating}>
+              {rotating ? "Rotating…" : "Rotate key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total VMs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{vms?.length ?? 0}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {vms?.filter((vm) => vm.status === "RUNNING").length ?? 0} running
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total vCPUs</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {vms?.reduce(
-                (sum, vm) =>
-                  sum + (typeof vm?.vcpuCount === "number" ? vm.vcpuCount : 0),
-                0,
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Across all VMs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">Total Memory</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {vms?.reduce(
-                (sum, vm) =>
-                  sum + (typeof vm.memSize === "number" ? vm.memSize : 0),
-                0,
-              )}{" "}
-              MB
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Allocated memory
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      {/* New key, shown once */}
+      <Dialog open={newKey !== null} onOpenChange={(o) => !o && setNewKey(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Your new API key</DialogTitle>
+            <DialogDescription>
+              Copy it now. Fuse only keeps a hash, so this is the only time you&apos;ll see it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="border border-border-strong bg-background p-4 font-mono text-sm break-all text-ember">
+            {newKey}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => newKey && copy("key", newKey)}>
+              {copied === "key" ? <Check /> : <Copy />}
+              {copied === "key" ? "Copied" : "Copy key"}
+            </Button>
+            <Button variant="light" onClick={() => setNewKey(null)}>
+              I&apos;ve saved it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </main>
+  );
+}
+
+/* ---------- pieces ---------- */
+
+const Stat = ({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: React.ReactNode;
+  className?: string;
+}) => (
+  <div className={cn("px-5 py-5 sm:px-8", className)}>
+    <span className="label-mono">{label}</span>
+    <p className="mt-2.5 font-mono text-[1.35rem] leading-none tabular-nums">{value}</p>
+  </div>
+);
+
+const StatusTag = ({ status }: { status: string }) => {
+  const s = STATUS[status] ?? { label: status, tone: "off" as const };
+  return (
+    <span
+      className={cn(
+        "inline-flex w-fit items-center gap-2 font-mono text-[0.7rem] uppercase tracking-[0.06em]",
+        TONE[s.tone],
+      )}
+    >
+      <span className={cn("h-1.5 w-1.5", DOT[s.tone], TRANSITIONAL.has(status) && "status-pulse")} />
+      {s.label}
+    </span>
   );
 };
 
-export default Home;
+const VmRow = ({
+  vm,
+  busy,
+  copied,
+  onCopy,
+  onToggle,
+  onDelete,
+}: {
+  vm: Vm;
+  busy: boolean;
+  copied: boolean;
+  onCopy: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+}) => {
+  const canToggle = vm.status === "RUNNING" || vm.status === "PAUSED";
+  const deleting = vm.status === "TERMINATING";
+  const created = new Date(vm.createdAt);
+
+  return (
+    <li className="grid gap-x-4 gap-y-3 px-5 py-4 transition-colors hover:bg-[#0d0d0d] sm:px-8 md:grid-cols-[minmax(0,1fr)_8rem_minmax(0,0.8fr)_9rem_10rem] md:items-center">
+      <div className="flex min-w-0 items-start justify-between gap-3 md:block">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1">
+            <code className="truncate font-mono text-[0.84rem] text-foreground" title={vm.id}>
+              {vm.id}
+            </code>
+            <button
+              onClick={onCopy}
+              aria-label="Copy sandbox ID"
+              title="Copy ID"
+              className="shrink-0 p-1 text-dim hover:text-foreground"
+            >
+              {copied ? <Check className="h-3 w-3 text-ok" /> : <Copy className="h-3 w-3" />}
+            </button>
+          </div>
+          <p className="mt-1 font-mono text-[0.7rem] text-dim">
+            {vm.vcpuCount} vCPU / {vm.memSize} MB /{" "}
+            <time dateTime={created.toISOString()} title={created.toLocaleString()}>
+              {relativeTime(created)}
+            </time>
+          </p>
+        </div>
+        <span className="md:hidden">
+          <StatusTag status={vm.status} />
+        </span>
+      </div>
+
+      <span className="hidden md:block">
+        <StatusTag status={vm.status} />
+      </span>
+
+      <div className="min-w-0 font-mono text-[0.8rem]">
+        <span className="label-mono mr-2 md:hidden">IP</span>
+        <span className="text-foreground">{vm.vmIp}</span>
+        <p className="hidden truncate text-[0.7rem] text-dim md:block">{vm.vmMac}</p>
+      </div>
+
+      <div className="min-w-0 font-mono text-[0.8rem]">
+        <span className="label-mono mr-2 md:hidden">Ports</span>
+        {vm.portMappings.length ? (
+          <span className="inline-flex flex-wrap gap-x-3 gap-y-1 md:flex-col md:gap-0.5">
+            {vm.portMappings.map((pm) => (
+              <span key={pm.id} className="whitespace-nowrap">
+                {pm.hostPort}
+                <span className="text-dim"> → </span>
+                {pm.vmPort}
+              </span>
+            ))}
+          </span>
+        ) : (
+          <span className="text-dim">—</span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5 md:justify-end">
+        {canToggle && (
+          <Button variant="outline" size="sm" onClick={onToggle} disabled={busy}>
+            {vm.status === "RUNNING" ? <Pause /> : <Play />}
+            {busy
+              ? vm.status === "RUNNING"
+                ? "Pausing"
+                : "Resuming"
+              : vm.status === "RUNNING"
+                ? "Pause"
+                : "Resume"}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 hover:bg-bad/10 hover:text-bad"
+          onClick={onDelete}
+          disabled={busy || deleting}
+          aria-label={`Delete ${vm.id}`}
+          title="Delete"
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    </li>
+  );
+};
+
+const PlaceholderRow = () => (
+  <li className="flex items-center justify-between gap-4 px-5 py-4 sm:px-8">
+    <div>
+      <div className="h-4 w-56 animate-pulse bg-muted" />
+      <p className="mt-2 font-mono text-[0.7rem] text-dim">
+        reserving ip / copying rootfs / starting firecracker…
+      </p>
+    </div>
+    <StatusTag status="CREATING" />
+  </li>
+);
+
+const ListSkeleton = () => (
+  <ul className="divide-y" aria-label="Loading sandboxes">
+    {[0, 1].map((i) => (
+      <li key={i} className="flex items-center gap-8 px-8 py-5">
+        <div className="h-4 w-60 animate-pulse bg-muted" />
+        <div className="h-3 w-20 animate-pulse bg-muted" />
+        <div className="hidden h-4 w-28 animate-pulse bg-muted md:block" />
+      </li>
+    ))}
+  </ul>
+);
+
+const EmptyState = ({
+  onCreate,
+  creating,
+  disabled,
+}: {
+  onCreate: () => void;
+  creating: boolean;
+  disabled: boolean;
+}) => (
+  <div className="relative overflow-hidden px-5 py-16 sm:px-8">
+    <div className="dot-grid pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_left,black,transparent_70%)]" />
+    <div className="relative max-w-md">
+      <p className="font-mono text-[0.78rem] text-dim">
+        <span className="text-ember">$</span> fuse ls
+        <br />
+        <span>0 sandboxes</span>
+      </p>
+      <h2 className="mt-6 text-xl font-medium tracking-tight">No sandboxes yet</h2>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        A new sandbox boots a fresh microVM and is ready for commands in a few seconds.
+      </p>
+      <Button className="mt-7" onClick={onCreate} disabled={creating || disabled}>
+        <Plus />
+        {creating ? "Booting…" : "New sandbox"}
+      </Button>
+    </div>
+  </div>
+);
+
+const TryIt = ({
+  vmId,
+  copied,
+  onCopy,
+}: {
+  vmId?: string;
+  copied: boolean;
+  onCopy: (text: string) => void;
+}) => {
+  const id = vmId ?? "<sandbox id>";
+  const snippet = `curl -X POST ${API_BASE}/firecracker/exec/run \\
+  -H "Authorization: Bearer $FUSE_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"id":"${id}","projectId":"demo","command":"uname -a"}'`;
+
+  return (
+    <section className="border-b bg-[#0c0c0c]">
+      <div className="flex h-11 items-center justify-between border-b px-5 sm:px-8">
+        <span className="flex items-center gap-4 font-mono text-[0.7rem]">
+          <span className="text-foreground">quickstart.sh</span>
+          <span className="text-dim">
+            {vmId ? "run a command in your sandbox" : "run a command from the API"}
+          </span>
+        </span>
+        <button
+          onClick={() => onCopy(snippet)}
+          className="flex items-center gap-1.5 font-mono text-[0.68rem] uppercase tracking-[0.05em] text-dim hover:text-foreground"
+        >
+          {copied ? <Check className="h-3 w-3 text-ok" /> : <Copy className="h-3 w-3" />}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <pre className="overflow-x-auto px-5 py-5 font-mono text-[0.76rem] leading-[1.75] text-[#d6d6d6] sm:px-8">
+        <code>
+          <span className="text-ember">curl</span>
+          {snippet.slice(4)}
+        </code>
+      </pre>
+    </section>
+  );
+};
