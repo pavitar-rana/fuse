@@ -44,5 +44,5 @@ coverage
 **/lib/generated/prisma
 **/generated/prisma
 
-# personal notes / study material
-notes/
+# server backup: holds secrets (DB URL, OAuth secret, guest ssh key) and a 655 MB image
+notes/setup/backup/
